@@ -1,6 +1,4 @@
-# Retell Custom LLM Python Demo
-
-This is a demo of using Retell with a custom LLM in Python. The demo shows how to integrate Retell with OpenAI's API to create a voice AI agent for a burger restaurant ordering system.
+# Phone Ordering System
 
 ## Features
 
@@ -116,7 +114,3 @@ Agent: Great! We'll have your order ready for pickup in about 15 minutes. You ca
 User: No, that's all.
 Agent: Thank you for your order, Mike! We appreciate your business and look forward to serving you. Have a great day!
 ```
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
