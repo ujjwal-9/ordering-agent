@@ -14,6 +14,8 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 import os
+import json
+import time
 
 Base = declarative_base()
 
@@ -49,7 +51,7 @@ class Order(Base):
     id = Column(Integer, primary_key=True)
     customer_id = Column(Integer, ForeignKey("customers.id"))
     customer_name = Column(String, nullable=False)
-    customer_phone = Column(Integer, nullable=False)
+    customer_phone = Column(String, nullable=False)
     delivery_address = Column(String, nullable=False)
     order_items = Column(JSON, nullable=False)  # Store order items as JSON
     total_amount = Column(Float, nullable=False)
@@ -68,8 +70,9 @@ class Customer(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
-    phone = Column(Integer, nullable=False, unique=True)
+    phone = Column(String, nullable=False, unique=True)
     address = Column(String, nullable=False)
+    email = Column(String)  # Add email field
     preferred_payment_method = Column(String)
     dietary_preferences = Column(String)  # e.g., "vegetarian", "no-pork", etc.
     last_order_date = Column(DateTime)
@@ -106,8 +109,9 @@ class Database:
         # Check and add columns for customers table
         customer_columns = {
             "name": "VARCHAR",
-            "phone": "INTEGER",
+            "phone": "VARCHAR",
             "address": "VARCHAR",
+            "email": "VARCHAR",  # Add email field
             "preferred_payment_method": "VARCHAR",
             "dietary_preferences": "VARCHAR",
             "last_order_date": "TIMESTAMP",
@@ -120,7 +124,7 @@ class Database:
         order_columns = {
             "customer_id": "INTEGER",
             "customer_name": "VARCHAR",
-            "customer_phone": "INTEGER",
+            "customer_phone": "VARCHAR",
             "delivery_address": "VARCHAR",
             "order_items": "JSON",
             "total_amount": "FLOAT",
@@ -237,77 +241,70 @@ class Database:
         return 1 - (previous_row[-1] / max_len)
 
     def get_customer_by_phone(self, phone):
-        # Ensure phone is an integer
-        try:
-            phone_int = int(phone)
-            return (
-                self.session.query(Customer).filter(Customer.phone == phone_int).first()
-            )
-        except (ValueError, TypeError):
-            return None
+        # Return customer by phone (as string)
+        return self.session.query(Customer).filter(Customer.phone == str(phone)).first()
 
     def create_customer(
         self,
         name,
         phone,
         address,
+        email=None,
         preferred_payment_method=None,
         dietary_preferences=None,
     ):
-        # Ensure phone is an integer
         try:
-            phone_int = int(phone)
-        except (ValueError, TypeError):
-            raise ValueError("Phone number must be a valid integer")
+            # Store phone as string
+            customer = Customer(
+                name=name,
+                phone=str(phone),
+                address=address,
+                email=email,
+                preferred_payment_method=preferred_payment_method,
+                dietary_preferences=dietary_preferences,
+            )
+            print(f"Creating customer: {name}, phone: {phone}, address: {address}")
+            self.session.add(customer)
+            self.session.flush()  # Flush to get the id without committing yet
+            print(f"Customer created with ID: {customer.id}")
+            return customer
+        except Exception as e:
+            import traceback
 
-        customer = Customer(
-            name=name,
-            phone=phone_int,
-            address=address,
-            preferred_payment_method=preferred_payment_method,
-            dietary_preferences=dietary_preferences,
-        )
-        self.session.add(customer)
-        self.session.commit()
-        return customer
+            print(f"Error creating customer: {e}")
+            print(f"Traceback: {traceback.format_exc()}")
+            self.session.rollback()
+            raise
 
     def update_customer(self, phone, **kwargs):
-        # Ensure phone is an integer
-        try:
-            phone_int = int(phone)
-        except (ValueError, TypeError):
-            raise ValueError("Phone number must be a valid integer")
-
-        customer = self.get_customer_by_phone(phone_int)
+        # Find customer by phone (as string)
+        customer = self.get_customer_by_phone(str(phone))
         if not customer:
             return None
 
-        # If phone is being updated, ensure it's an integer
-        if "phone" in kwargs:
-            try:
-                kwargs["phone"] = int(kwargs["phone"])
-            except (ValueError, TypeError):
-                raise ValueError("Phone number must be a valid integer")
+        try:
+            # If phone is being updated, ensure it's stored as string
+            if "phone" in kwargs:
+                kwargs["phone"] = str(kwargs["phone"])
 
-        for key, value in kwargs.items():
-            setattr(customer, key, value)
-        self.session.commit()
-        return customer
+            for key, value in kwargs.items():
+                setattr(customer, key, value)
+
+            self.session.flush()  # Flush changes without committing yet
+            return customer
+        except Exception as e:
+            import traceback
+
+            print(f"Error updating customer: {e}")
+            print(f"Traceback: {traceback.format_exc()}")
+            self.session.rollback()
+            raise
 
     def get_customer_order_history(self, phone):
-        # Ensure phone is an integer
-        try:
-            phone_int = int(phone)
-        except (ValueError, TypeError):
-            return []
-
-        customer = self.get_customer_by_phone(phone_int)
-        if not customer:
-            return []
-
+        # Find orders by phone (as string)
         return (
             self.session.query(Order)
-            .filter(Order.customer_phone == phone_int)
+            .filter(Order.customer_phone == str(phone))
             .order_by(Order.created_at.desc())
             .all()
         )
@@ -322,45 +319,85 @@ class Database:
         payment_method=None,
         special_instructions=None,
     ):
-        # Ensure customer_phone is an integer
         try:
-            customer_phone_int = int(customer_phone)
-        except (ValueError, TypeError):
-            raise ValueError("Phone number must be a valid integer")
+            # Store customer_phone as string
+            customer_phone_str = str(customer_phone)
+            print(f"Creating order for: {customer_name}, phone: {customer_phone_str}")
 
-        # Check if customer exists
-        customer = self.get_customer_by_phone(customer_phone_int)
-        if not customer:
-            # Create a new customer with minimal information
-            customer = self.create_customer(
-                name=customer_name,
-                phone=customer_phone_int,
-                address=delivery_address,
+            # Check if customer exists
+            customer = self.get_customer_by_phone(customer_phone_str)
+            if not customer:
+                print(f"Customer not found, creating new customer: {customer_name}")
+                # Create a new customer with minimal information
+                try:
+                    customer = Customer(
+                        name=customer_name,
+                        phone=customer_phone_str,
+                        address=delivery_address,
+                    )
+                    self.session.add(customer)
+                    self.session.flush()  # Get ID without committing yet
+                    print(f"New customer created with ID: {customer.id}")
+                except Exception as e:
+                    print(f"Error creating customer: {e}")
+                    self.session.rollback()
+                    raise
+
+            # Update customer's last order date and total orders
+            print(f"Updating customer data for ID: {customer.id}")
+            customer.last_order_date = datetime.utcnow()
+            customer.total_orders += 1
+
+            # Calculate estimated preparation time
+            estimated_preparation_time = self._calculate_preparation_time(order_items)
+            print(f"Estimated preparation time: {estimated_preparation_time} minutes")
+
+            # Create the order
+            print(
+                f"Creating order with: {len(order_items)} items, total: ${total_amount}"
             )
 
-        # Update customer's last order date and total orders
-        customer.last_order_date = datetime.utcnow()
-        customer.total_orders += 1
-        self.session.commit()
+            # Ensure order_items is properly serialized as JSON
+            order_items_json = order_items
+            if not isinstance(order_items, str):
+                try:
+                    # Check if we can serialize and deserialize it
+                    order_items_json = json.dumps(order_items)
+                    json.loads(order_items_json)
+                    print(
+                        f"Successfully serialized order_items: {order_items_json[:100]}"
+                    )
+                except Exception as e:
+                    print(f"Error serializing order_items: {e}")
+                    print(f"Original order_items: {order_items}")
+                    raise
 
-        # Calculate estimated preparation time
-        estimated_preparation_time = self._calculate_preparation_time(order_items)
+            order = Order(
+                customer_id=customer.id,
+                customer_name=customer_name,
+                customer_phone=customer_phone_str,
+                delivery_address=delivery_address,
+                order_items=order_items,  # SQLAlchemy should handle JSON serialization
+                total_amount=total_amount,
+                payment_method=payment_method,
+                special_instructions=special_instructions,
+                estimated_preparation_time=estimated_preparation_time,
+            )
+            self.session.add(order)
 
-        # Create the order
-        order = Order(
-            customer_id=customer.id,
-            customer_name=customer_name,
-            customer_phone=customer_phone_int,
-            delivery_address=delivery_address,
-            order_items=order_items,
-            total_amount=total_amount,
-            payment_method=payment_method,
-            special_instructions=special_instructions,
-            estimated_preparation_time=estimated_preparation_time,
-        )
-        self.session.add(order)
-        self.session.commit()
-        return order
+            # Flush to get the ID but don't commit yet
+            self.session.flush()
+            print(f"Order prepared with ID: {order.id}")
+
+            # We don't commit here - the caller will commit or rollback the entire transaction
+            return order
+        except Exception as e:
+            import traceback
+
+            print(f"Unexpected error in create_order: {e}")
+            print(f"Traceback: {traceback.format_exc()}")
+            self.session.rollback()
+            raise
 
     def _calculate_preparation_time(self, order_items):
         # Simple implementation - can be made more sophisticated
@@ -378,3 +415,29 @@ class Database:
             self.session.commit()
             return order
         return None
+
+    def safe_commit(self):
+        """Commits the current transaction safely, with retry logic."""
+        max_retries = 3
+        retry_count = 0
+
+        while retry_count < max_retries:
+            try:
+                self.session.commit()
+                return True
+            except Exception as e:
+                retry_count += 1
+                import traceback
+
+                print(f"Commit failed (attempt {retry_count}/{max_retries}): {e}")
+                print(f"Traceback: {traceback.format_exc()}")
+
+                # Wait a bit before retrying (with increasing delay)
+                time.sleep(0.1 * retry_count)
+
+                if retry_count >= max_retries:
+                    print("Maximum retry attempts reached, rolling back transaction")
+                    self.session.rollback()
+                    return False
+
+        return False

@@ -1,4 +1,4 @@
-from database import Database, MenuItem, AddOn
+from app.database import Database, MenuItem, AddOn, Customer
 
 
 def init_database():
@@ -7,6 +7,7 @@ def init_database():
     # Clear existing data
     db.session.query(MenuItem).delete()
     db.session.query(AddOn).delete()
+    db.session.query(Customer).delete()
 
     # Add menu items
     menu_items = [
@@ -64,6 +65,55 @@ def init_database():
         AddOn(name="Olives", category="pizza", price=1.50),
     ]
 
+    # Add sample customers
+    customers = [
+        Customer(
+            name="John Smith",
+            phone="5551234567",
+            address="123 Main St, Anytown, CA 94105",
+            email="john.smith@example.com",
+            preferred_payment_method="credit card",
+            dietary_preferences="no preferences",
+            total_orders=5,
+        ),
+        Customer(
+            name="Emily Johnson",
+            phone="5559876543",
+            address="456 Oak Ave, Somewhere, NY 10001",
+            email="emily.j@example.com",
+            preferred_payment_method="cash",
+            dietary_preferences="vegetarian",
+            total_orders=3,
+        ),
+        Customer(
+            name="Michael Brown",
+            phone="5552223333",
+            address="789 Pine Rd, Elsewhere, TX 75001",
+            email="mbrown@example.com",
+            preferred_payment_method="digital payment",
+            dietary_preferences="gluten-free",
+            total_orders=7,
+        ),
+        Customer(
+            name="Sarah Williams",
+            phone="5554445555",
+            address="321 Cedar Ln, Nowhere, FL 33101",
+            email="sarahw@example.com",
+            preferred_payment_method="credit card",
+            dietary_preferences="dairy-free",
+            total_orders=2,
+        ),
+        Customer(
+            name="David Miller",
+            phone="5556667777",
+            address="654 Birch St, Anywhere, WA 98101",
+            email="dmiller@example.com",
+            preferred_payment_method="cash",
+            dietary_preferences="no preferences",
+            total_orders=0,
+        ),
+    ]
+
     # Add all items to database
     for item in menu_items:
         db.session.add(item)
@@ -71,8 +121,11 @@ def init_database():
     for addon in add_ons:
         db.session.add(addon)
 
+    for customer in customers:
+        db.session.add(customer)
+
     db.session.commit()
-    print("Database initialized with menu items and add-ons!")
+    print("Database initialized with menu items, add-ons, and customer details!")
 
 
 if __name__ == "__main__":
