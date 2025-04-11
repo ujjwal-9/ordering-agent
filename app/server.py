@@ -14,8 +14,6 @@ from .custom_types import (
 # from .llm import LlmClient  # Comment out the original LlmClient
 from .order_llm import LlmClient
 
-# from .order_llm import OrderLlmClient  # Use our new OrderLlmClient
-
 load_dotenv(override=True)
 app = FastAPI()
 retell = Retell(api_key=os.environ["RETELL_API_KEY"])

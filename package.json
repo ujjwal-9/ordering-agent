@@ -2,10 +2,10 @@
   "name": "retell-twilio-webhook",
   "version": "1.0.0",
   "description": "Twilio webhook for Retell custom LLM integration",
-  "main": "main.js",
+  "main": "twilio_webhook.js",
   "scripts": {
-    "start": "node main.js",
-    "dev": "nodemon main.js"
+    "start": "node twilio_webhook.js",
+    "dev": "nodemon twilio_webhook.js"
   },
   "dependencies": {
     "dotenv": "^16.3.1",

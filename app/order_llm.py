@@ -1,13 +1,22 @@
 from openai import AsyncOpenAI
 import os
 import json
+import logging
 from .custom_types import (
     ResponseRequiredRequest,
     ResponseResponse,
     Utterance,
 )
-from typing import List
+from typing import List, Tuple, Optional
 from .database import Database
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler("db_operations.log"), logging.StreamHandler()],
+)
+logger = logging.getLogger("db_operations")
 
 begin_sentence = "Welcome to Tote AI Restaurant! I'm your virtual order assistant. To get started, could you please tell me your name?"
 
@@ -75,8 +84,12 @@ class LlmClient:
 
     def prepare_prompt(self, request: ResponseRequiredRequest):
         # Get menu information from database
+        logger.info("Retrieving menu information from database")
         menu_items = self.db.get_menu()
+        logger.info(f"Retrieved {len(menu_items)} menu items")
+
         add_ons = self.db.get_add_ons()
+        logger.info(f"Retrieved {len(add_ons)} add-ons")
 
         # Format menu information for the prompt
         menu_info = "## Our Delicious Menu\n"
@@ -183,8 +196,8 @@ When discussing the menu:
                                 "description": "The name of the customer",
                             },
                             "phone": {
-                                "type": "string",
-                                "description": "The phone number of the customer",
+                                "type": "integer",
+                                "description": "The phone number of the customer (must be a number without spaces or special characters)",
                             },
                         },
                         "required": ["name", "phone"],
@@ -204,8 +217,8 @@ When discussing the menu:
                                 "description": "The current step of information collection (phone, name, address, email, payment_method, dietary_preferences)",
                             },
                             "phone": {
-                                "type": "string",
-                                "description": "The phone number of the customer",
+                                "type": "integer",
+                                "description": "The phone number of the customer (must be a number without spaces or special characters)",
                             },
                             "name": {
                                 "type": "string",
@@ -241,8 +254,8 @@ When discussing the menu:
                         "type": "object",
                         "properties": {
                             "phone": {
-                                "type": "string",
-                                "description": "The phone number of the customer",
+                                "type": "integer",
+                                "description": "The phone number of the customer (must be a number without spaces or special characters)",
                             },
                         },
                         "required": ["phone"],
@@ -283,8 +296,8 @@ When discussing the menu:
                                 "description": "The name of the customer",
                             },
                             "customer_phone": {
-                                "type": "string",
-                                "description": "The phone number of the customer",
+                                "type": "integer",
+                                "description": "The phone number of the customer (must be a number without spaces or special characters)",
                             },
                             "delivery_address": {
                                 "type": "string",
@@ -352,6 +365,37 @@ When discussing the menu:
         ]
         return functions
 
+    def _validate_phone_number(self, phone) -> Tuple[bool, Optional[int], str]:
+        """
+        Validates a phone number.
+        Returns a tuple of (is_valid, phone_int, error_message)
+        """
+        try:
+            # First convert to string to handle if it's already an integer
+            phone_str = str(phone)
+
+            # Remove any non-digit characters for validation
+            digits_only = "".join(c for c in phone_str if c.isdigit())
+
+            # Check if it's exactly 10 digits
+            if len(digits_only) != 10:
+                return (
+                    False,
+                    None,
+                    "Phone number must be exactly 10 digits long. Please try again.",
+                )
+
+            # Convert to integer for database operations
+            phone_int = int(digits_only)
+            return True, phone_int, ""
+
+        except (ValueError, TypeError):
+            return (
+                False,
+                None,
+                "That doesn't appear to be a valid phone number. Please provide a 10-digit number without spaces or special characters.",
+            )
+
     async def draft_response(self, request: ResponseRequiredRequest):
         prompt = self.prepare_prompt(request)
         func_call = {}
@@ -393,11 +437,32 @@ When discussing the menu:
                 func_call["arguments"] = json.loads(func_arguments)
                 name = func_call["arguments"]["name"]
                 phone = func_call["arguments"]["phone"]
-                customer = self.db.get_customer_by_phone(phone)
+
+                # Validate phone number
+                is_valid, phone_int, error_message = self._validate_phone_number(phone)
+                if not is_valid:
+                    logger.warning(f"Invalid phone number format: {phone}")
+                    response = ResponseResponse(
+                        response_id=request.response_id,
+                        content=error_message,
+                        content_complete=True,
+                        end_call=False,
+                    )
+                    yield response
+                    return
+
+                logger.info(f"Verifying customer with phone: {phone_int}")
+                customer = self.db.get_customer_by_phone(phone_int)
 
                 if customer:
+                    logger.info(
+                        f"Found existing customer: {customer.name} (phone: {customer.phone})"
+                    )
                     response_text = f"Welcome back, {customer.name}! I found your information in our records. "
-                    response_text += f"Your phone number is {customer.phone}, and your delivery address is {customer.address}. "
+                    response_text += (
+                        f"Your phone number is {phone_int}, is that correct? "
+                    )
+                    response_text += f"Your delivery address is {customer.address}. "
 
                     # Only include optional fields if they exist and have values
                     try:
@@ -434,9 +499,10 @@ When discussing the menu:
                     )
                     yield response
                 else:
+                    logger.info(f"No existing customer found for phone: {phone_int}")
                     response = ResponseResponse(
                         response_id=request.response_id,
-                        content=f"Nice to meet you, {name}! I don't have your information in our records yet. Let's start with your order, and I'll collect your delivery address at the end. What would you like to order today?",
+                        content=f"Nice to meet you, {name}! I've got your phone number as {phone_int}, is that correct? I don't have your information in our records yet. Let's start with your order, and I'll collect your delivery address at the end. What would you like to order today?",
                         content_complete=True,
                         end_call=False,
                     )
@@ -493,12 +559,37 @@ When discussing the menu:
 
                 elif step == "complete":
                     # Create or update customer with all collected information
-                    customer = self.db.get_customer_by_phone(
+                    # Validate phone number
+                    is_valid, phone_int, error_message = self._validate_phone_number(
                         func_call["arguments"]["phone"]
                     )
+                    if not is_valid:
+                        logger.warning(
+                            f"Invalid phone number format: {func_call['arguments']['phone']}"
+                        )
+                        response = ResponseResponse(
+                            response_id=request.response_id,
+                            content=error_message,
+                            content_complete=True,
+                            end_call=False,
+                        )
+                        yield response
+                        return
+
+                    logger.info(f"Phone validation successful: {phone_int}")
+
+                    # Process the customer info with the validated phone number
+                    logger.info(
+                        f"Completing customer information collection for phone: {phone_int}"
+                    )
+                    customer = self.db.get_customer_by_phone(phone_int)
+
                     if customer:
+                        logger.info(
+                            f"Updating existing customer: {customer.name} (phone: {phone_int})"
+                        )
                         customer = self.db.update_customer(
-                            func_call["arguments"]["phone"],
+                            phone_int,
                             name=func_call["arguments"]["name"],
                             address=func_call["arguments"]["address"],
                             email=func_call["arguments"].get("email"),
@@ -509,10 +600,12 @@ When discussing the menu:
                                 "dietary_preferences"
                             ),
                         )
+                        logger.info(f"Customer updated successfully: {customer.name}")
                     else:
+                        logger.info(f"Creating new customer with phone: {phone_int}")
                         customer = self.db.create_customer(
                             name=func_call["arguments"]["name"],
-                            phone=func_call["arguments"]["phone"],
+                            phone=phone_int,
                             address=func_call["arguments"]["address"],
                             email=func_call["arguments"].get("email"),
                             preferred_payment_method=func_call["arguments"].get(
@@ -521,11 +614,14 @@ When discussing the menu:
                             dietary_preferences=func_call["arguments"].get(
                                 "dietary_preferences"
                             ),
+                        )
+                        logger.info(
+                            f"New customer created successfully: {customer.name}"
                         )
 
                     response = ResponseResponse(
                         response_id=request.response_id,
-                        content="Thank you for providing your information. What would you like to order today?",
+                        content=f"Thank you for providing your information. I've added your phone number {phone_int} to our records. What would you like to order today?",
                         content_complete=True,
                         end_call=False,
                     )
@@ -533,9 +629,31 @@ When discussing the menu:
 
             elif func_call["func_name"] == "get_order_history":
                 func_call["arguments"] = json.loads(func_arguments)
-                phone = func_call["arguments"]["phone"]
-                orders = self.db.get_customer_order_history(phone)
+                # Validate phone number
+                is_valid, phone_int, error_message = self._validate_phone_number(
+                    func_call["arguments"]["phone"]
+                )
+                if not is_valid:
+                    logger.warning(
+                        f"Invalid phone number format: {func_call['arguments']['phone']}"
+                    )
+                    response = ResponseResponse(
+                        response_id=request.response_id,
+                        content=error_message,
+                        content_complete=True,
+                        end_call=False,
+                    )
+                    yield response
+                    return
+
+                logger.info(
+                    f"Retrieving order history for customer with phone: {phone_int}"
+                )
+                orders = self.db.get_customer_order_history(phone_int)
                 if orders:
+                    logger.info(
+                        f"Found {len(orders)} orders for customer with phone: {phone_int}"
+                    )
                     response_text = "Here's your order history:\n\n"
                     for order in orders[:5]:  # Show last 5 orders
                         response_text += f"Order #{order.id} ({order.created_at.strftime('%Y-%m-%d')}):\n"
@@ -553,6 +671,9 @@ When discussing the menu:
                     )
                     yield response
                 else:
+                    logger.info(
+                        f"No order history found for customer with phone: {phone_int}"
+                    )
                     response = ResponseResponse(
                         response_id=request.response_id,
                         content="I don't see any previous orders in your history. Would you like to place an order?",
@@ -565,8 +686,12 @@ When discussing the menu:
                 func_call["arguments"] = json.loads(func_arguments)
                 item_name = func_call["arguments"]["item_name"]
                 category = func_call["arguments"].get("category")
+                logger.info(f"Verifying menu item: {item_name} (category: {category})")
                 similar_item = self.db.find_similar_menu_item(item_name, category)
                 if similar_item:
+                    logger.info(
+                        f"Found similar menu item: {similar_item.name} (category: {similar_item.category})"
+                    )
                     response = ResponseResponse(
                         response_id=request.response_id,
                         content=f"I found a similar item: {similar_item.name} (${similar_item.base_price:.2f}). Would you like to order this instead?",
@@ -575,6 +700,7 @@ When discussing the menu:
                     )
                     yield response
                 else:
+                    logger.info(f"No similar menu item found for: {item_name}")
                     response = ResponseResponse(
                         response_id=request.response_id,
                         content="I couldn't find that item on our menu. Would you like to see our available options?",
@@ -585,15 +711,39 @@ When discussing the menu:
 
             elif func_call["func_name"] == "create_order":
                 func_call["arguments"] = json.loads(func_arguments)
+                # Validate phone number
+                is_valid, customer_phone_int, error_message = (
+                    self._validate_phone_number(
+                        func_call["arguments"]["customer_phone"]
+                    )
+                )
+                if not is_valid:
+                    logger.warning(
+                        f"Invalid phone number format: {func_call['arguments']['customer_phone']}"
+                    )
+                    response = ResponseResponse(
+                        response_id=request.response_id,
+                        content=error_message,
+                        content_complete=True,
+                        end_call=False,
+                    )
+                    yield response
+                    return
+
+                logger.info(
+                    f"Creating new order for customer: {func_call['arguments']['customer_name']} (phone: {customer_phone_int})"
+                )
+                logger.info(f"Order items: {func_call['arguments']['order_items']}")
                 order = self.db.create_order(
                     customer_name=func_call["arguments"]["customer_name"],
-                    customer_phone=func_call["arguments"]["customer_phone"],
+                    customer_phone=customer_phone_int,
                     delivery_address=func_call["arguments"]["delivery_address"],
                     order_items=func_call["arguments"]["order_items"],
                     total_amount=self._calculate_total_amount(
                         func_call["arguments"]["order_items"]
                     ),
                 )
+                logger.info(f"Order created successfully: Order #{order.id}")
                 response = ResponseResponse(
                     response_id=request.response_id,
                     content=f"Great! I've placed your order. Your order number is #{order.id}. Estimated preparation time is {order.estimated_preparation_time} minutes. Is there anything else you need?",
@@ -615,10 +765,17 @@ When discussing the menu:
             elif func_call["func_name"] == "get_item_addons":
                 func_call["arguments"] = json.loads(func_arguments)
                 item_name = func_call["arguments"]["item_name"]
+                logger.info(f"Getting add-ons for menu item: {item_name}")
                 menu_item = self.db.find_similar_menu_item(item_name)
                 if menu_item:
+                    logger.info(
+                        f"Found menu item: {menu_item.name} (category: {menu_item.category})"
+                    )
                     add_ons = self.db.get_add_ons(menu_item.category)
                     if add_ons:
+                        logger.info(
+                            f"Found {len(add_ons)} add-ons for {menu_item.name}"
+                        )
                         response_text = f"Excellent choice! The {menu_item.name} is one of our favorites. "
                         response_text += (
                             "You can make it even better with some delicious add-ons. "
@@ -634,6 +791,7 @@ When discussing the menu:
                         )
                         yield response
                     else:
+                        logger.info(f"No add-ons found for menu item: {menu_item.name}")
                         response = ResponseResponse(
                             response_id=request.response_id,
                             content=f"Perfect choice! The {menu_item.name} is delicious as is. Would you like to order anything else?",
@@ -642,6 +800,7 @@ When discussing the menu:
                         )
                         yield response
                 else:
+                    logger.info(f"Menu item not found: {item_name}")
                     response = ResponseResponse(
                         response_id=request.response_id,
                         content="I'm not sure I found that item on our menu. Let me show you what we have available.",
@@ -660,11 +819,22 @@ When discussing the menu:
 
     def _calculate_total_amount(self, order_items):
         total = 0
+        logger.info(f"Calculating total amount for order items: {order_items}")
         for item in order_items:
+            logger.info(
+                f"Processing item: {item['item_name']} (quantity: {item['quantity']})"
+            )
             menu_item = self.db.find_similar_menu_item(item["item_name"])
             if menu_item:
-                total += menu_item.base_price * item["quantity"]
+                logger.info(
+                    f"Found menu item: {menu_item.name} (base price: ${menu_item.base_price})"
+                )
+                item_total = menu_item.base_price * item["quantity"]
+                total += item_total
+                logger.info(f"Base price for {item['item_name']}: ${item_total}")
+
                 for addon_name in item.get("add_ons", []):
+                    logger.info(f"Processing add-on: {addon_name} for {menu_item.name}")
                     addon = next(
                         (
                             a
@@ -674,5 +844,17 @@ When discussing the menu:
                         None,
                     )
                     if addon:
-                        total += addon.price * item["quantity"]
+                        addon_total = addon.price * item["quantity"]
+                        total += addon_total
+                        logger.info(
+                            f"Add-on {addon_name} added ${addon_total} to total"
+                        )
+                    else:
+                        logger.warning(
+                            f"Add-on not found: {addon_name} for {menu_item.name}"
+                        )
+            else:
+                logger.warning(f"Menu item not found: {item['item_name']}")
+
+        logger.info(f"Total order amount calculated: ${total}")
         return total

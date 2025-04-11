@@ -49,7 +49,7 @@ class Order(Base):
     id = Column(Integer, primary_key=True)
     customer_id = Column(Integer, ForeignKey("customers.id"))
     customer_name = Column(String, nullable=False)
-    customer_phone = Column(String, nullable=False)
+    customer_phone = Column(Integer, nullable=False)
     delivery_address = Column(String, nullable=False)
     order_items = Column(JSON, nullable=False)  # Store order items as JSON
     total_amount = Column(Float, nullable=False)
@@ -68,7 +68,7 @@ class Customer(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
-    phone = Column(String, nullable=False, unique=True)
+    phone = Column(Integer, nullable=False, unique=True)
     address = Column(String, nullable=False)
     preferred_payment_method = Column(String)
     dietary_preferences = Column(String)  # e.g., "vegetarian", "no-pork", etc.
@@ -106,7 +106,7 @@ class Database:
         # Check and add columns for customers table
         customer_columns = {
             "name": "VARCHAR",
-            "phone": "VARCHAR",
+            "phone": "INTEGER",
             "address": "VARCHAR",
             "preferred_payment_method": "VARCHAR",
             "dietary_preferences": "VARCHAR",
@@ -120,7 +120,7 @@ class Database:
         order_columns = {
             "customer_id": "INTEGER",
             "customer_name": "VARCHAR",
-            "customer_phone": "VARCHAR",
+            "customer_phone": "INTEGER",
             "delivery_address": "VARCHAR",
             "order_items": "JSON",
             "total_amount": "FLOAT",
@@ -237,7 +237,14 @@ class Database:
         return 1 - (previous_row[-1] / max_len)
 
     def get_customer_by_phone(self, phone):
-        return self.session.query(Customer).filter(Customer.phone == phone).first()
+        # Ensure phone is an integer
+        try:
+            phone_int = int(phone)
+            return (
+                self.session.query(Customer).filter(Customer.phone == phone_int).first()
+            )
+        except (ValueError, TypeError):
+            return None
 
     def create_customer(
         self,
@@ -247,9 +254,15 @@ class Database:
         preferred_payment_method=None,
         dietary_preferences=None,
     ):
+        # Ensure phone is an integer
+        try:
+            phone_int = int(phone)
+        except (ValueError, TypeError):
+            raise ValueError("Phone number must be a valid integer")
+
         customer = Customer(
             name=name,
-            phone=phone,
+            phone=phone_int,
             address=address,
             preferred_payment_method=preferred_payment_method,
             dietary_preferences=dietary_preferences,
@@ -259,24 +272,45 @@ class Database:
         return customer
 
     def update_customer(self, phone, **kwargs):
-        customer = self.get_customer_by_phone(phone)
-        if customer:
-            for key, value in kwargs.items():
-                setattr(customer, key, value)
-            self.session.commit()
-            return customer
-        return None
+        # Ensure phone is an integer
+        try:
+            phone_int = int(phone)
+        except (ValueError, TypeError):
+            raise ValueError("Phone number must be a valid integer")
+
+        customer = self.get_customer_by_phone(phone_int)
+        if not customer:
+            return None
+
+        # If phone is being updated, ensure it's an integer
+        if "phone" in kwargs:
+            try:
+                kwargs["phone"] = int(kwargs["phone"])
+            except (ValueError, TypeError):
+                raise ValueError("Phone number must be a valid integer")
+
+        for key, value in kwargs.items():
+            setattr(customer, key, value)
+        self.session.commit()
+        return customer
 
     def get_customer_order_history(self, phone):
-        customer = self.get_customer_by_phone(phone)
-        if customer:
-            return (
-                self.session.query(Order)
-                .filter(Order.customer_phone == phone)
-                .order_by(Order.created_at.desc())
-                .all()
-            )
-        return []
+        # Ensure phone is an integer
+        try:
+            phone_int = int(phone)
+        except (ValueError, TypeError):
+            return []
+
+        customer = self.get_customer_by_phone(phone_int)
+        if not customer:
+            return []
+
+        return (
+            self.session.query(Order)
+            .filter(Order.customer_phone == phone_int)
+            .order_by(Order.created_at.desc())
+            .all()
+        )
 
     def create_order(
         self,
@@ -288,42 +322,45 @@ class Database:
         payment_method=None,
         special_instructions=None,
     ):
+        # Ensure customer_phone is an integer
         try:
-            # Get or create customer
-            customer = self.get_customer_by_phone(customer_phone)
-            if not customer:
-                customer = self.create_customer(
-                    name=customer_name,
-                    phone=customer_phone,
-                    address=delivery_address,
-                )
+            customer_phone_int = int(customer_phone)
+        except (ValueError, TypeError):
+            raise ValueError("Phone number must be a valid integer")
 
-            # Create order
-            order = Order(
-                customer_id=customer.id,
-                customer_name=customer_name,
-                customer_phone=customer_phone,
-                delivery_address=delivery_address,
-                order_items=order_items,
-                total_amount=total_amount,
-                payment_method=payment_method,
-                special_instructions=special_instructions,
-                estimated_preparation_time=self._calculate_preparation_time(
-                    order_items
-                ),
+        # Check if customer exists
+        customer = self.get_customer_by_phone(customer_phone_int)
+        if not customer:
+            # Create a new customer with minimal information
+            customer = self.create_customer(
+                name=customer_name,
+                phone=customer_phone_int,
+                address=delivery_address,
             )
 
-            # Update customer stats
-            customer.last_order_date = datetime.utcnow()
-            customer.total_orders += 1
+        # Update customer's last order date and total orders
+        customer.last_order_date = datetime.utcnow()
+        customer.total_orders += 1
+        self.session.commit()
 
-            self.session.add(order)
-            self.session.commit()
-            return order
-        except Exception as e:
-            self.session.rollback()
-            print(f"Error creating order: {e}")
-            raise
+        # Calculate estimated preparation time
+        estimated_preparation_time = self._calculate_preparation_time(order_items)
+
+        # Create the order
+        order = Order(
+            customer_id=customer.id,
+            customer_name=customer_name,
+            customer_phone=customer_phone_int,
+            delivery_address=delivery_address,
+            order_items=order_items,
+            total_amount=total_amount,
+            payment_method=payment_method,
+            special_instructions=special_instructions,
+            estimated_preparation_time=estimated_preparation_time,
+        )
+        self.session.add(order)
+        self.session.commit()
+        return order
 
     def _calculate_preparation_time(self, order_items):
         # Simple implementation - can be made more sophisticated
