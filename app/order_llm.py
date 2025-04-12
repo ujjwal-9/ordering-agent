@@ -29,32 +29,35 @@ agent_prompt = """Task: As a professional restaurant order assistant for Tote AI
 - If new, collect their information after the order is complete
 
 2. Menu Knowledge:
-- Offer burgers and pizzas with their add-ons
-- Provide accurate pricing information
-- Mention current special offers or promotions
-- Stick to the items present in the menu and add-ons
+- Offer ONLY items that are available in the database
+- Check the 'is_available' column before suggesting any item - if it's 0, the item is NOT available
+- Inform customers when a requested item is unavailable and suggest alternatives
+- Provide accurate pricing information for available items
+- Mention current special offers or promotions when applicable
+- Stick strictly to the items present in the menu and add-ons
+- You can't take special instructions, stick to what's available
 
 3. Order Taking:
 - Guide customers through the ordering process
-- Dont deviate from the original menu provided
-- Confirm item selections and add-ons, when the customer has completed giving their full order
-- Ask for any special instructions or preferences
-- Collect customer details (name, phone, delivery address)
-- Provide estimated preparation and delivery times
+- Only offer items that exist in the database AND are marked as available
+- Confirm item selections and add-ons when the customer has completed giving their full order
+- Collect customer details (name, phone)
+- Inform customers this is a PICKUP ONLY restaurant (no delivery service)
 
 4. Customer Service:
 - Be friendly and professional
-- Handle modifications and special requests
+- Handle modifications and special requests within available options
 - Provide clear pricing information
 - Confirm order details before finalizing
+- After order completion, provide the pickup address and estimated preparation time
 
 5. Additional Information:
-- Mention current wait times
-- Inform about delivery radius and minimum order amounts
+- Mention current wait times for pickup
 - Explain payment options
 - Handle order tracking requests
+- Clearly communicate the pickup address when the order is confirmed
 
-Conversational Style: Be friendly and efficient. Keep responses concise but informative. Use a warm, welcoming tone while maintaining professionalism. Dont put things in point wise fashion, rather take a more conversation flow approach.
+Conversational Style: Be friendly and efficient. Keep responses concise but informative. Use a warm, welcoming tone while maintaining professionalism. Don't put things in point wise fashion, rather take a more conversation flow approach. When asking for confirmations, wait for the user to respond before providing additional information - don't continue with more information until you get a response.
 
 Personality: Be helpful and attentive, but also efficient in taking orders. Show enthusiasm about the menu items while maintaining a professional demeanor."""
 
@@ -105,9 +108,15 @@ class LlmClient:
         # Format menu information for the prompt
         menu_info = "## Our Delicious Menu\n"
 
+        # Filter available items only
+        available_items = [
+            item for item in menu_items if getattr(item, "is_available", 1) == 1
+        ]
+        logger.info(f"Filtered to {len(available_items)} available menu items")
+
         # Group items by category
         categories = {}
-        for item in menu_items:
+        for item in available_items:
             if item.category not in categories:
                 categories[item.category] = []
             categories[item.category].append(item)
@@ -124,9 +133,9 @@ class LlmClient:
                     menu_info += f" - {item.description}"
             menu_info += ".\n"
 
-        menu_info += (
-            "\nEverything is prepared fresh to order. What would you like to try today?"
-        )
+        menu_info += "\nEverything is prepared fresh to order for pickup at our restaurant. What would you like to try today?"
+
+        menu_info += "\n\nPlease note: We are a PICKUP ONLY restaurant. Once your order is confirmed, we'll provide you with our pickup address and an estimated preparation time."
 
         prompt = [
             {
@@ -146,7 +155,7 @@ You are a friendly and enthusiastic voice AI order assistant for Tote AI Restaur
 - [Explain items] Describe ingredients and preparation methods when asked
 - [Handle modifications] Be flexible with order modifications and special requests
 - [Confirm details] Always confirm order details, including add-ons and special instructions
-- [Provide estimates] Give clear information about costs, preparation time, and delivery estimates
+- [Provide estimates] Give clear information about costs, preparation time, and pickup information
 - [Collect information] Gather necessary customer details in a friendly, conversational way
 - [Handle ASR errors] If you're unsure about what the customer said, politely ask for clarification
 
@@ -158,6 +167,7 @@ When discussing the menu:
 - Use phrases like "we have", "you can try", "I recommend"
 - Make suggestions naturally within the conversation
 - Ask about preferences to make better recommendations
+- Only recommend items that are marked as available in the database
 
 ## Order Taking Process
 1. First show the basic menu without add-ons
@@ -169,6 +179,8 @@ When discussing the menu:
 4. After the user has given the complete order:
    - Confirm the complete items with add-ons
    - Ask if they'd like to order anything else
+5. When order is complete:
+   - Provide the pickup address and estimated preparation time
 
 
 """
@@ -226,7 +238,7 @@ When discussing the menu:
                         "properties": {
                             "step": {
                                 "type": "string",
-                                "description": "The current step of information collection (phone, name, address, email, payment_method, dietary_preferences)",
+                                "description": "The current step of information collection (phone, name, email, payment_method, dietary_preferences)",
                             },
                             "phone": {
                                 "type": "integer",
@@ -235,10 +247,6 @@ When discussing the menu:
                             "name": {
                                 "type": "string",
                                 "description": "The name of the customer",
-                            },
-                            "address": {
-                                "type": "string",
-                                "description": "The delivery address",
                             },
                             "email": {
                                 "type": "string",
@@ -311,10 +319,6 @@ When discussing the menu:
                                 "type": "integer",
                                 "description": "The phone number of the customer (must be a number without spaces or special characters)",
                             },
-                            "delivery_address": {
-                                "type": "string",
-                                "description": "The delivery address",
-                            },
                             "order_items": {
                                 "type": "array",
                                 "description": "List of items in the order",
@@ -334,7 +338,6 @@ When discussing the menu:
                         "required": [
                             "customer_name",
                             "customer_phone",
-                            "delivery_address",
                             "order_items",
                         ],
                     },
@@ -470,7 +473,6 @@ When discussing the menu:
                     response_text += (
                         f"Your phone number is {phone_str}, is that correct? "
                     )
-                    response_text += f"Your delivery address is {customer.address}. "
 
                     # Only include optional fields if they exist and have values
                     if (
@@ -502,7 +504,7 @@ When discussing the menu:
                     logger.info(f"No existing customer found for phone: {phone_str}")
                     yield ResponseResponse(
                         response_id=request.response_id,
-                        content=f"Nice to meet you, {name}! I've got your phone number as {phone_str}, is that correct? I don't have your information in our records yet. Let's start with your order, and I'll collect your delivery address at the end. What would you like to order today?",
+                        content=f"Nice to meet you, {name}! I've got your phone number as {phone_str}, is that correct? I don't have your information in our records yet. Let's start with your order. What would you like to order today?",
                         content_complete=True,
                         end_call=False,
                     )
@@ -515,14 +517,6 @@ When discussing the menu:
                     yield ResponseResponse(
                         response_id=request.response_id,
                         content="What is your name?",
-                        content_complete=True,
-                        end_call=False,
-                    )
-
-                elif step == "address":
-                    yield ResponseResponse(
-                        response_id=request.response_id,
-                        content="What is your delivery address?",
                         content_complete=True,
                         end_call=False,
                     )
@@ -573,7 +567,6 @@ When discussing the menu:
 
                     customer_data = {
                         "name": func_call["arguments"]["name"],
-                        "address": func_call["arguments"]["address"],
                         "email": func_call["arguments"].get("email"),
                         "preferred_payment_method": func_call["arguments"].get(
                             "preferred_payment_method"
@@ -677,13 +670,24 @@ When discussing the menu:
                 category = func_call["arguments"].get("category")
                 logger.info(f"Verifying menu item: {item_name} (category: {category})")
                 similar_item = self.db.find_similar_menu_item(item_name, category)
+
                 if similar_item:
-                    yield ResponseResponse(
-                        response_id=request.response_id,
-                        content=f"I found a similar item: {similar_item.name} (${similar_item.base_price:.2f}). Would you like to order this instead?",
-                        content_complete=True,
-                        end_call=False,
-                    )
+                    # Check if the item is available
+                    if getattr(similar_item, "is_available", 1) == 1:
+                        yield ResponseResponse(
+                            response_id=request.response_id,
+                            content=f"I found {similar_item.name} (${similar_item.base_price:.2f}). Would you like to order this?",
+                            content_complete=True,
+                            end_call=False,
+                        )
+                    else:
+                        # If the item exists but is unavailable
+                        yield ResponseResponse(
+                            response_id=request.response_id,
+                            content=f"I'm sorry, but {similar_item.name} is currently unavailable. Would you like to see other options in our menu?",
+                            content_complete=True,
+                            end_call=False,
+                        )
                 else:
                     yield ResponseResponse(
                         response_id=request.response_id,
@@ -716,7 +720,6 @@ When discussing the menu:
                     order_data = {
                         "customer_name": func_call["arguments"]["customer_name"],
                         "customer_phone": customer_phone_str,
-                        "delivery_address": func_call["arguments"]["delivery_address"],
                         "order_items": func_call["arguments"]["order_items"],
                     }
 
@@ -751,9 +754,12 @@ When discussing the menu:
                                 "Failed to commit order after multiple retry attempts"
                             )
 
+                        # Define the pickup address - this could be stored in a configuration or environment variable in a real application
+                        pickup_address = "123 Main Street, Downtown, CA 94123"
+
                         yield ResponseResponse(
                             response_id=request.response_id,
-                            content=f"Great! I've placed your order. Your order number is #{order.id}. Estimated preparation time is {order.estimated_preparation_time} minutes. Is there anything else you need?",
+                            content=f"Great! I've placed your order. Your order number is #{order.id}. You can pick up your order at our restaurant located at {pickup_address}. Estimated preparation time is {order.estimated_preparation_time} minutes. Please bring your order number with you. Is there anything else you need?",
                             content_complete=True,
                             end_call=False,
                         )
@@ -792,7 +798,18 @@ When discussing the menu:
                 func_call["arguments"] = json.loads(func_arguments)
                 item_name = func_call["arguments"]["item_name"]
                 menu_item = self.db.find_similar_menu_item(item_name)
+
                 if menu_item:
+                    # Check if the item is available
+                    if getattr(menu_item, "is_available", 1) == 0:
+                        yield ResponseResponse(
+                            response_id=request.response_id,
+                            content=f"I'm sorry, but {menu_item.name} is currently unavailable. Would you like to see other options in our menu?",
+                            content_complete=True,
+                            end_call=False,
+                        )
+                        return
+
                     add_ons = self.db.get_add_ons(menu_item.category)
                     if add_ons:
                         response_text = f"Excellent choice! The {menu_item.name} is one of our favorites. "
@@ -839,7 +856,7 @@ When discussing the menu:
         total = 0
         for item in order_items:
             menu_item = self.db.find_similar_menu_item(item["item_name"])
-            if menu_item:
+            if menu_item and getattr(menu_item, "is_available", 1) == 1:
                 item_total = menu_item.base_price * item["quantity"]
                 total += item_total
 
