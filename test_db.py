@@ -21,8 +21,10 @@ def test_database_operations():
             test_customer = db.create_customer(
                 name="Test Customer",
                 phone="1234567890",
-                address="123 Test St, Test City, TS 12345",
+                email="test@example.com",
+                auto_commit=True,
             )
+            # The customer is auto-committed now
             print(f"Created test customer with ID: {test_customer.id}")
         except Exception as e:
             print(f"Failed to create customer: {e}")
@@ -56,10 +58,12 @@ def test_database_operations():
             test_order = db.create_order(
                 customer_name="Test Customer",
                 customer_phone="1234567890",
-                delivery_address="123 Test St, Test City, TS 12345",
                 order_items=test_order_items,
                 total_amount=19.99,
+                special_instructions="No onions please",
+                auto_commit=True,
             )
+            # The order is auto-committed now
             print(f"Created order with ID: {test_order.id}")
         except Exception as e:
             print(f"Failed to create order: {e}")

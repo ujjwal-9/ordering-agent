@@ -1,22 +1,57 @@
-import json
 import os
+import json
 import asyncio
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+    Depends,
+    HTTPException,
+    Body,
+)
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from concurrent.futures import TimeoutError as ConnectionTimeoutError
 from retell import Retell
-from .custom_types import (
+from app.custom_types import (
     ConfigResponse,
     ResponseRequiredRequest,
 )
+from pydantic import BaseModel
+from typing import Optional, List, Dict, Any, Union
 
-# from .llm import LlmClient  # Comment out the original LlmClient
-from .order_llm import LlmClient
+from app.order_llm import OrderAgent
+from app.auth_api import router as auth_router, get_current_user
+from app.user_model import User, UserManager
+from app.database import Database, MenuItem, AddOn, Restaurant, Order, Customer
 
 load_dotenv(override=True)
 app = FastAPI()
 retell = Retell(api_key=os.environ["RETELL_API_KEY"])
+
+# Initialize database and ensure all tables are created
+db = Database()
+print("Database initialized and tables created")
+
+# List of allowed ports for frontend dev
+ports = [3000, 3001, 3002, 3003]
+allow_origins = [f"http://localhost:{port}" for port in ports] + [
+    f"http://127.0.0.1:{port}" for port in ports
+]
+
+# Configure CORS middleware for the frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allow_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include the authentication router
+app.include_router(auth_router)
 
 
 # Handle webhook from Retell server. This is used to receive events from Retell server.
@@ -60,7 +95,7 @@ async def handle_webhook(request: Request):
 async def websocket_handler(websocket: WebSocket, call_id: str):
     try:
         await websocket.accept()
-        llm_client = LlmClient()  # Comment out the original LlmClient
+        llm_client = OrderAgent()  # Comment out the original LlmClient
 
         # Send optional config to Retell server
         config = ConfigResponse(
@@ -127,3 +162,504 @@ async def websocket_handler(websocket: WebSocket, call_id: str):
         await websocket.close(1011, "Server error")
     finally:
         print(f"LLM WebSocket connection closed for {call_id}")
+
+
+# API endpoints for menu items
+@app.get("/menu")
+async def get_menu_items(
+    category: str = None, current_user: User = Depends(get_current_user)
+):
+    db = Database()
+    menu_items = db.get_menu(category)
+    return [
+        {
+            "id": item.id,
+            "name": item.name,
+            "category": item.category,
+            "base_price": item.base_price,
+            "description": item.description,
+            "is_available": item.is_available == 1,
+            "created_at": item.created_at,
+            "updated_at": item.updated_at,
+        }
+        for item in menu_items
+    ]
+
+
+# Models for request validation
+class MenuItemCreate(BaseModel):
+    name: str
+    category: str
+    base_price: float
+    description: Optional[str] = None
+    is_available: Optional[bool] = True
+
+
+class MenuItemUpdate(BaseModel):
+    name: Optional[str] = None
+    category: Optional[str] = None
+    base_price: Optional[float] = None
+    description: Optional[str] = None
+    is_available: Optional[bool] = None
+
+
+# Create new menu item
+@app.post("/menu")
+async def create_menu_item(
+    item: MenuItemCreate, current_user: User = Depends(get_current_user)
+):
+    db = Database()
+    try:
+        new_item = MenuItem(
+            name=item.name,
+            category=item.category,
+            base_price=item.base_price,
+            description=item.description,
+            is_available=1 if item.is_available else 0,
+        )
+        db.session.add(new_item)
+        db.safe_commit()
+        return {
+            "id": new_item.id,
+            "name": new_item.name,
+            "category": new_item.category,
+            "base_price": new_item.base_price,
+            "description": new_item.description,
+            "is_available": new_item.is_available == 1,
+            "created_at": new_item.created_at,
+            "updated_at": new_item.updated_at,
+        }
+    except Exception as e:
+        db.session.rollback()
+        raise HTTPException(
+            status_code=400, detail=f"Failed to create menu item: {str(e)}"
+        )
+
+
+# Update menu item
+@app.put("/menu/{item_id}")
+async def update_menu_item(
+    item_id: int, item: MenuItemUpdate, current_user: User = Depends(get_current_user)
+):
+    db = Database()
+    try:
+        existing_item = (
+            db.session.query(MenuItem).filter(MenuItem.id == item_id).first()
+        )
+        if not existing_item:
+            raise HTTPException(status_code=404, detail="Menu item not found")
+
+        if item.name is not None:
+            existing_item.name = item.name
+        if item.category is not None:
+            existing_item.category = item.category
+        if item.base_price is not None:
+            existing_item.base_price = item.base_price
+        if item.description is not None:
+            existing_item.description = item.description
+        if item.is_available is not None:
+            existing_item.is_available = 1 if item.is_available else 0
+
+        db.safe_commit()
+        return {
+            "id": existing_item.id,
+            "name": existing_item.name,
+            "category": existing_item.category,
+            "base_price": existing_item.base_price,
+            "description": existing_item.description,
+            "is_available": existing_item.is_available == 1,
+            "created_at": existing_item.created_at,
+            "updated_at": existing_item.updated_at,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.session.rollback()
+        raise HTTPException(
+            status_code=400, detail=f"Failed to update menu item: {str(e)}"
+        )
+
+
+# Delete menu item
+@app.delete("/menu/{item_id}")
+async def delete_menu_item(
+    item_id: int, current_user: User = Depends(get_current_user)
+):
+    db = Database()
+    try:
+        existing_item = (
+            db.session.query(MenuItem).filter(MenuItem.id == item_id).first()
+        )
+        if not existing_item:
+            raise HTTPException(status_code=404, detail="Menu item not found")
+
+        db.session.delete(existing_item)
+        db.safe_commit()
+        return {"message": f"Menu item with ID {item_id} has been deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.session.rollback()
+        raise HTTPException(
+            status_code=400, detail=f"Failed to delete menu item: {str(e)}"
+        )
+
+
+# API endpoint for add-ons
+@app.get("/addons")
+async def get_addons(
+    category: str = None, current_user: User = Depends(get_current_user)
+):
+    db = Database()
+    addons = db.get_add_ons(category)
+    return [
+        {
+            "id": addon.id,
+            "name": addon.name,
+            "category": addon.category,
+            "price": addon.price,
+            "is_available": addon.is_available == 1,
+            "created_at": addon.created_at,
+            "updated_at": addon.updated_at,
+        }
+        for addon in addons
+    ]
+
+
+# Models for AddOn requests
+class AddOnCreate(BaseModel):
+    name: str
+    category: str
+    price: float
+    is_available: Optional[bool] = True
+
+
+class AddOnUpdate(BaseModel):
+    name: Optional[str] = None
+    category: Optional[str] = None
+    price: Optional[float] = None
+    is_available: Optional[bool] = None
+
+
+# Create add-on
+@app.post("/addons")
+async def create_addon(
+    addon: AddOnCreate, current_user: User = Depends(get_current_user)
+):
+    db = Database()
+    try:
+        new_addon = AddOn(
+            name=addon.name,
+            category=addon.category,
+            price=addon.price,
+            is_available=1 if addon.is_available else 0,
+        )
+        db.session.add(new_addon)
+        db.safe_commit()
+        return {
+            "id": new_addon.id,
+            "name": new_addon.name,
+            "category": new_addon.category,
+            "price": new_addon.price,
+            "is_available": new_addon.is_available == 1,
+            "created_at": new_addon.created_at,
+            "updated_at": new_addon.updated_at,
+        }
+    except Exception as e:
+        db.session.rollback()
+        raise HTTPException(
+            status_code=400, detail=f"Failed to create add-on: {str(e)}"
+        )
+
+
+# Update add-on
+@app.put("/addons/{addon_id}")
+async def update_addon(
+    addon_id: int, addon: AddOnUpdate, current_user: User = Depends(get_current_user)
+):
+    db = Database()
+    try:
+        existing_addon = db.session.query(AddOn).filter(AddOn.id == addon_id).first()
+        if not existing_addon:
+            raise HTTPException(status_code=404, detail="Add-on not found")
+
+        if addon.name is not None:
+            existing_addon.name = addon.name
+        if addon.category is not None:
+            existing_addon.category = addon.category
+        if addon.price is not None:
+            existing_addon.price = addon.price
+        if addon.is_available is not None:
+            existing_addon.is_available = 1 if addon.is_available else 0
+
+        db.safe_commit()
+        return {
+            "id": existing_addon.id,
+            "name": existing_addon.name,
+            "category": existing_addon.category,
+            "price": existing_addon.price,
+            "is_available": existing_addon.is_available == 1,
+            "created_at": existing_addon.created_at,
+            "updated_at": existing_addon.updated_at,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.session.rollback()
+        raise HTTPException(
+            status_code=400, detail=f"Failed to update add-on: {str(e)}"
+        )
+
+
+# Delete add-on
+@app.delete("/addons/{addon_id}")
+async def delete_addon(addon_id: int, current_user: User = Depends(get_current_user)):
+    db = Database()
+    try:
+        existing_addon = db.session.query(AddOn).filter(AddOn.id == addon_id).first()
+        if not existing_addon:
+            raise HTTPException(status_code=404, detail="Add-on not found")
+
+        db.session.delete(existing_addon)
+        db.safe_commit()
+        return {"message": f"Add-on with ID {addon_id} has been deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.session.rollback()
+        raise HTTPException(
+            status_code=400, detail=f"Failed to delete add-on: {str(e)}"
+        )
+
+
+# API endpoint for orders
+@app.get("/orders")
+async def get_orders(
+    status: str = None, current_user: User = Depends(get_current_user)
+):
+    db = Database()
+    query = db.session.query(Order)
+    if status:
+        query = query.filter(Order.status == status)
+    orders = query.order_by(Order.created_at.desc()).all()
+    return [
+        {
+            "id": order.id,
+            "customer_id": order.customer_id,
+            "customer_name": order.customer_name,
+            "customer_phone": order.customer_phone,
+            "order_items": order.order_items,
+            "total_amount": order.total_amount,
+            "status": order.status,
+            "estimated_preparation_time": order.estimated_preparation_time,
+            "payment_method": order.payment_method,
+            "special_instructions": order.special_instructions,
+            "created_at": order.created_at,
+            "updated_at": order.updated_at,
+        }
+        for order in orders
+    ]
+
+
+class OrderCreate(BaseModel):
+    customer_name: str
+    customer_phone: str
+    order_items: list
+    total_amount: float
+    payment_method: Optional[str] = None
+    special_instructions: Optional[str] = None
+
+
+# Create a new order
+@app.post("/orders")
+async def create_order(
+    order_data: OrderCreate, current_user: User = Depends(get_current_user)
+):
+    db = Database()
+    try:
+        new_order = db.create_order(
+            customer_name=order_data.customer_name,
+            customer_phone=order_data.customer_phone,
+            order_items=order_data.order_items,
+            total_amount=order_data.total_amount,
+            payment_method=order_data.payment_method,
+            special_instructions=order_data.special_instructions,
+            auto_commit=True,
+        )
+
+        return {
+            "id": new_order.id,
+            "customer_id": new_order.customer_id,
+            "customer_name": new_order.customer_name,
+            "customer_phone": new_order.customer_phone,
+            "order_items": new_order.order_items,
+            "total_amount": new_order.total_amount,
+            "status": new_order.status,
+            "estimated_preparation_time": new_order.estimated_preparation_time,
+            "payment_method": new_order.payment_method,
+            "special_instructions": new_order.special_instructions,
+            "created_at": new_order.created_at,
+            "updated_at": new_order.updated_at,
+        }
+    except Exception as e:
+        db.session.rollback()
+        raise HTTPException(status_code=400, detail=f"Failed to create order: {str(e)}")
+
+
+# Get order by ID
+@app.get("/orders/{order_id}")
+async def get_order_by_id(
+    order_id: int, current_user: User = Depends(get_current_user)
+):
+    db = Database()
+    order = db.session.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    return {
+        "id": order.id,
+        "customer_id": order.customer_id,
+        "customer_name": order.customer_name,
+        "customer_phone": order.customer_phone,
+        "order_items": order.order_items,
+        "total_amount": order.total_amount,
+        "status": order.status,
+        "estimated_preparation_time": order.estimated_preparation_time,
+        "payment_method": order.payment_method,
+        "special_instructions": order.special_instructions,
+        "created_at": order.created_at,
+        "updated_at": order.updated_at,
+    }
+
+
+class OrderStatusUpdate(BaseModel):
+    status: str
+
+
+# Update order status
+@app.put("/orders/{order_id}/status")
+async def update_order_status(
+    order_id: int,
+    update: OrderStatusUpdate,
+    current_user: User = Depends(get_current_user),
+):
+    db = Database()
+    updated_order = db.update_order_status(order_id, update.status)
+    if not updated_order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    return {"message": f"Order status updated to {update.status}"}
+
+
+# API endpoint for customers
+@app.get("/customers")
+async def get_customers(current_user: User = Depends(get_current_user)):
+    db = Database()
+    # This is a simplified approach - in a real app, you'd implement pagination
+    # and more sophisticated querying
+    customers = db.session.query(Customer).limit(100).all()
+    return [
+        {
+            "id": customer.id,
+            "name": customer.name,
+            "phone": customer.phone,
+            "email": customer.email,
+            "preferred_payment_method": customer.preferred_payment_method,
+            "dietary_preferences": customer.dietary_preferences,
+            "last_order_date": customer.last_order_date,
+            "total_orders": customer.total_orders,
+            "created_at": customer.created_at,
+            "updated_at": customer.updated_at,
+        }
+        for customer in customers
+    ]
+
+
+# Get customer by phone number
+@app.get("/customers/{phone}")
+async def get_customer_by_phone(
+    phone: str, current_user: User = Depends(get_current_user)
+):
+    db = Database()
+    customer = db.get_customer_by_phone(phone)
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return customer
+
+
+class CustomerUpdate(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    preferred_payment_method: Optional[str] = None
+    dietary_preferences: Optional[str] = None
+
+
+# Update customer information
+@app.put("/customers/{phone}")
+async def update_customer(
+    phone: str, customer: CustomerUpdate, current_user: User = Depends(get_current_user)
+):
+    db = Database()
+    update_data = {k: v for k, v in customer.dict().items() if v is not None}
+    updated_customer = db.update_customer(phone, auto_commit=True, **update_data)
+    if not updated_customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return updated_customer
+
+
+# Get restaurant information
+@app.get("/restaurant")
+async def get_restaurant(current_user: User = Depends(get_current_user)):
+    db = Database()
+    restaurant = db.get_restaurant()
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurant information not found")
+    return restaurant
+
+
+class RestaurantUpdate(BaseModel):
+    name: Optional[str] = None
+    address: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    opening_hours: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+# Update restaurant information
+@app.put("/restaurant/{restaurant_id}")
+async def update_restaurant(
+    restaurant_id: int,
+    data: RestaurantUpdate,
+    current_user: User = Depends(get_current_user),
+):
+    db = Database()
+    try:
+        restaurant = (
+            db.session.query(Restaurant).filter(Restaurant.id == restaurant_id).first()
+        )
+        if not restaurant:
+            raise HTTPException(status_code=404, detail="Restaurant not found")
+
+        if data.name is not None:
+            restaurant.name = data.name
+        if data.address is not None:
+            restaurant.address = data.address
+        if data.phone is not None:
+            restaurant.phone = data.phone
+        if data.email is not None:
+            restaurant.email = data.email
+        if data.opening_hours is not None:
+            restaurant.opening_hours = data.opening_hours
+        if data.is_active is not None:
+            restaurant.is_active = data.is_active
+
+        db.safe_commit()
+        return restaurant
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.session.rollback()
+        raise HTTPException(
+            status_code=400, detail=f"Failed to update restaurant information: {str(e)}"
+        )

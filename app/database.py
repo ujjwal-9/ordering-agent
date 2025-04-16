@@ -9,6 +9,7 @@ from sqlalchemy import (
     JSON,
     inspect,
     text,
+    Boolean,
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -16,6 +17,7 @@ from datetime import datetime
 import os
 import json
 import time
+from app.user_model import User, Base as UserBase
 
 Base = declarative_base()
 
@@ -52,7 +54,6 @@ class Order(Base):
     customer_id = Column(Integer, ForeignKey("customers.id"))
     customer_name = Column(String, nullable=False)
     customer_phone = Column(String, nullable=False)
-    delivery_address = Column(String, nullable=False)
     order_items = Column(JSON, nullable=False)  # Store order items as JSON
     total_amount = Column(Float, nullable=False)
     status = Column(
@@ -71,7 +72,6 @@ class Customer(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
     phone = Column(String, nullable=False, unique=True)
-    address = Column(String, nullable=False)
     email = Column(String)  # Add email field
     preferred_payment_method = Column(String)
     dietary_preferences = Column(String)  # e.g., "vegetarian", "no-pork", etc.
@@ -84,23 +84,58 @@ class Customer(Base):
     orders = relationship("Order", backref="customer", lazy=True)
 
 
+class Restaurant(Base):
+    __tablename__ = "restaurants"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    address = Column(String, nullable=False)
+    phone = Column(String, nullable=False)
+    email = Column(String)
+    opening_hours = Column(String)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class Database:
     def __init__(self):
-        database_url = os.getenv(
-            "DATABASE_URL",
-            "postgresql://postgres:postgres@localhost:5432/tote",
-        )
-        self.engine = create_engine(database_url)
+        try:
+            # Construct database URL from individual environment variables
+            db_user = os.getenv("DATABASE_USER", "postgres")
+            db_password = os.getenv("DATABASE_PASSWORD", "postgres")
+            db_host = os.getenv("DATABASE_HOST", "localhost")
+            db_port = os.getenv("DATABASE_PORT", "5432")
+            db_name = os.getenv("DATABASE_NAME", "tote")
 
-        # Create all tables
-        Base.metadata.create_all(self.engine)
+            # Build the connection string
+            database_url = (
+                f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+            )
+            print(f"Using database URL: {database_url}")
 
-        # Initialize session
-        Session = sessionmaker(bind=self.engine)
-        self.session = Session()
+            self.engine = create_engine(database_url)
 
-        # Ensure all required columns exist
-        self._ensure_all_columns()
+            # Create all tables including User table from user_model
+            Base.metadata.create_all(self.engine)
+            UserBase.metadata.create_all(self.engine)
+
+            # Initialize session
+            Session = sessionmaker(bind=self.engine)
+            self.session = Session()
+
+            # Ensure all required columns exist
+            self._ensure_all_columns()
+
+            # Initialize restaurant data if none exists
+            self._initialize_restaurant()
+
+            # Make sure User table exists
+            self._ensure_user_table()
+
+        except Exception as e:
+            print(f"Error initializing database: {e}")
+            raise
 
     def _ensure_all_columns(self):
         """Ensure all required columns exist in all tables."""
@@ -110,7 +145,6 @@ class Database:
         customer_columns = {
             "name": "VARCHAR",
             "phone": "VARCHAR",
-            "address": "VARCHAR",
             "email": "VARCHAR",  # Add email field
             "preferred_payment_method": "VARCHAR",
             "dietary_preferences": "VARCHAR",
@@ -125,7 +159,6 @@ class Database:
             "customer_id": "INTEGER",
             "customer_name": "VARCHAR",
             "customer_phone": "VARCHAR",
-            "delivery_address": "VARCHAR",
             "order_items": "JSON",
             "total_amount": "FLOAT",
             "status": "VARCHAR",
@@ -183,6 +216,27 @@ class Database:
 
             conn.commit()
 
+    def _initialize_restaurant(self):
+        """Initialize restaurant data if none exists."""
+        restaurant_count = self.session.query(Restaurant).count()
+        if restaurant_count == 0:
+            restaurant = Restaurant(
+                name="Tote AI Restaurant",
+                address="123 Main Street, Downtown, CA 94123",
+                phone="(555) 123-4567",
+                email="info@toteairestaurant.com",
+                opening_hours="Monday-Sunday: 11:00 AM - 10:00 PM",
+            )
+            self.session.add(restaurant)
+            self.session.commit()
+            print(f"Initialized restaurant data: {restaurant.name}")
+
+    def get_restaurant(self):
+        """Get the restaurant information."""
+        return (
+            self.session.query(Restaurant).filter(Restaurant.is_active == True).first()
+        )
+
     def get_menu(self, category=None):
         query = self.session.query(MenuItem)
         if category:
@@ -196,77 +250,46 @@ class Database:
         return query.filter(AddOn.is_available == 1).all()
 
     def find_similar_menu_item(self, item_name, category=None):
-        # This is a simple implementation. In production, you might want to use
-        # more sophisticated fuzzy matching or vector similarity search
+        if not item_name:
+            return None
+
+        item_name_lower = item_name.lower()
         query = self.session.query(MenuItem)
+
         if category:
             query = query.filter(MenuItem.category == category)
-        items = query.filter(MenuItem.is_available == 1).all()
 
-        # Simple string matching - can be improved with better algorithms
-        best_match = None
-        highest_similarity = 0
+        # Try exact match first
+        exact_match = query.filter(MenuItem.name.ilike(item_name_lower)).first()
+        if exact_match:
+            return exact_match
 
-        for item in items:
-            similarity = self._calculate_similarity(
-                item_name.lower(), item.name.lower()
-            )
+        # Try contains match
+        for item in query.all():
             if (
-                similarity > highest_similarity and similarity > 0.6
-            ):  # 60% similarity threshold
-                highest_similarity = similarity
-                best_match = item
+                item_name_lower in item.name.lower()
+                or item.name.lower() in item_name_lower
+            ):
+                return item
 
-        return best_match
+        return None
 
-    def _calculate_similarity(self, str1, str2):
-        # Simple Levenshtein distance implementation
-        # In production, use a proper string similarity library
-        if len(str1) < len(str2):
-            str1, str2 = str2, str1
-        if len(str2) == 0:
-            return 0
-
-        previous_row = range(len(str2) + 1)
-        for i, c1 in enumerate(str1):
-            current_row = [i + 1]
-            for j, c2 in enumerate(str2):
-                insertions = previous_row[j + 1] + 1
-                deletions = current_row[j] + 1
-                substitutions = previous_row[j] + (c1 != c2)
-                current_row.append(min(insertions, deletions, substitutions))
-            previous_row = current_row
-
-        max_len = max(len(str1), len(str2))
-        return 1 - (previous_row[-1] / max_len)
-
-    def get_customer_by_phone(self, phone):
-        # Return customer by phone (as string)
-        return self.session.query(Customer).filter(Customer.phone == str(phone)).first()
-
-    def create_customer(
-        self,
-        name,
-        phone,
-        address,
-        email=None,
-        preferred_payment_method=None,
-        dietary_preferences=None,
-    ):
+    def create_customer(self, name, phone, auto_commit=False, **kwargs):
         try:
-            # Store phone as string
             customer = Customer(
                 name=name,
-                phone=str(phone),
-                address=address,
-                email=email,
-                preferred_payment_method=preferred_payment_method,
-                dietary_preferences=dietary_preferences,
+                phone=str(phone),  # Ensure phone is stored as string
+                **kwargs,
             )
-            print(f"Creating customer: {name}, phone: {phone}, address: {address}")
             self.session.add(customer)
-            self.session.flush()  # Flush to get the id without committing yet
-            print(f"Customer created with ID: {customer.id}")
+            self.session.flush()  # Get ID without committing yet
+
+            # Auto-commit if requested
+            if auto_commit:
+                if not self.safe_commit():
+                    print("Failed to commit customer creation after multiple retries")
+                    raise Exception("Failed to commit customer creation")
+
             return customer
         except Exception as e:
             import traceback
@@ -276,7 +299,11 @@ class Database:
             self.session.rollback()
             raise
 
-    def update_customer(self, phone, **kwargs):
+    def get_customer_by_phone(self, phone):
+        # Search by phone as string
+        return self.session.query(Customer).filter(Customer.phone == str(phone)).first()
+
+    def update_customer(self, phone, auto_commit=False, **kwargs):
         # Find customer by phone (as string)
         customer = self.get_customer_by_phone(str(phone))
         if not customer:
@@ -291,6 +318,13 @@ class Database:
                 setattr(customer, key, value)
 
             self.session.flush()  # Flush changes without committing yet
+
+            # Auto-commit if requested
+            if auto_commit:
+                if not self.safe_commit():
+                    print("Failed to commit customer update after multiple retries")
+                    raise Exception("Failed to commit customer update")
+
             return customer
         except Exception as e:
             import traceback
@@ -313,11 +347,11 @@ class Database:
         self,
         customer_name,
         customer_phone,
-        delivery_address,
         order_items,
         total_amount,
         payment_method=None,
         special_instructions=None,
+        auto_commit=False,
     ):
         try:
             # Store customer_phone as string
@@ -333,7 +367,6 @@ class Database:
                     customer = Customer(
                         name=customer_name,
                         phone=customer_phone_str,
-                        address=delivery_address,
                     )
                     self.session.add(customer)
                     self.session.flush()  # Get ID without committing yet
@@ -376,7 +409,6 @@ class Database:
                 customer_id=customer.id,
                 customer_name=customer_name,
                 customer_phone=customer_phone_str,
-                delivery_address=delivery_address,
                 order_items=order_items,  # SQLAlchemy should handle JSON serialization
                 total_amount=total_amount,
                 payment_method=payment_method,
@@ -389,7 +421,12 @@ class Database:
             self.session.flush()
             print(f"Order prepared with ID: {order.id}")
 
-            # We don't commit here - the caller will commit or rollback the entire transaction
+            # Auto-commit if requested
+            if auto_commit:
+                if not self.safe_commit():
+                    print("Failed to commit order creation after multiple retries")
+                    raise Exception("Failed to commit order creation")
+
             return order
         except Exception as e:
             import traceback
@@ -417,27 +454,48 @@ class Database:
         return None
 
     def safe_commit(self):
-        """Commits the current transaction safely, with retry logic."""
-        max_retries = 3
-        retry_count = 0
+        """Safely commit changes to the database."""
+        try:
+            self.session.commit()
+            return True
+        except Exception as e:
+            print(f"Error committing changes: {e}")
+            self.session.rollback()
+            return False
 
-        while retry_count < max_retries:
-            try:
-                self.session.commit()
-                return True
-            except Exception as e:
-                retry_count += 1
-                import traceback
+    def begin_transaction(self):
+        """Begin a new transaction."""
+        # SQLAlchemy automatically starts a transaction when needed,
+        # but this method is provided for clarity
+        pass
 
-                print(f"Commit failed (attempt {retry_count}/{max_retries}): {e}")
-                print(f"Traceback: {traceback.format_exc()}")
+    def commit(self):
+        """Commit the current transaction."""
+        return self.safe_commit()
 
-                # Wait a bit before retrying (with increasing delay)
-                time.sleep(0.1 * retry_count)
+    def rollback(self):
+        """Roll back the current transaction."""
+        try:
+            self.session.rollback()
+            return True
+        except Exception as e:
+            print(f"Error rolling back transaction: {e}")
+            return False
 
-                if retry_count >= max_retries:
-                    print("Maximum retry attempts reached, rolling back transaction")
-                    self.session.rollback()
-                    return False
+    def _ensure_user_table(self):
+        """Ensure the User table exists and has the correct schema."""
+        inspector = inspect(self.engine)
+        user_table_exists = "users" in inspector.get_table_names()
 
-        return False
+        if not user_table_exists:
+            print("Creating users table...")
+            UserBase.metadata.create_all(self.engine)
+
+            # Verify table was created
+            inspector = inspect(self.engine)
+            if "users" in inspector.get_table_names():
+                print("Users table created successfully")
+            else:
+                print("WARNING: Failed to create users table")
+        else:
+            print("Users table already exists")

@@ -25,7 +25,9 @@ agent_prompt = """Task: As a professional restaurant order assistant for Tote AI
 1. Customer Verification:
 - Start by asking for the customer's name and phone number
 - Verify if they are a registered customer
-- If registered, confirm their information and proceed with ordering
+- ALWAYS wait for customer to confirm their phone number is correct before proceeding
+- After customer confirms their phone number, NEVER ask for confirmation again - move directly to menu presentation
+- Always use the customer's provided name throughout the conversation, even if it differs from the name in our records
 - If new, collect their information after the order is complete
 
 2. Menu Knowledge:
@@ -43,6 +45,7 @@ agent_prompt = """Task: As a professional restaurant order assistant for Tote AI
 - Confirm item selections and add-ons when the customer has completed giving their full order
 - Collect customer details (name, phone)
 - Inform customers this is a PICKUP ONLY restaurant (no delivery service)
+- AVOID repeating order confirmations - confirm the complete order ONLY ONCE
 
 4. Customer Service:
 - Be friendly and professional
@@ -57,12 +60,18 @@ agent_prompt = """Task: As a professional restaurant order assistant for Tote AI
 - Handle order tracking requests
 - Clearly communicate the pickup address when the order is confirmed
 
-Conversational Style: Be friendly and efficient. Keep responses concise but informative. Use a warm, welcoming tone while maintaining professionalism. Don't put things in point wise fashion, rather take a more conversation flow approach. When asking for confirmations, wait for the user to respond before providing additional information - don't continue with more information until you get a response.
+6. CRITICAL - Avoiding Loops:
+- NEVER ask the same confirmation question twice
+- After a customer confirms information, acknowledge it and MOVE ON to the next step
+- If a customer says "yes," "correct," "that's right," or similar, immediately proceed to the next step
+- Do not get stuck in confirmation loops - always make forward progress in the conversation
+
+Conversational Style: Be friendly and efficient. Keep responses concise but informative. Use a warm, welcoming tone while maintaining professionalism. Don't put things in point wise fashion, rather take a more conversation flow approach. When asking for confirmations, wait for the user to respond before providing additional information - don't continue with more information until you get a response. Never confirm the same order details multiple times in a single message or across consecutive messages.
 
 Personality: Be helpful and attentive, but also efficient in taking orders. Show enthusiasm about the menu items while maintaining a professional demeanor."""
 
 
-class LlmClient:
+class OrderAgent:
     def __init__(self):
         self.client = AsyncOpenAI(
             api_key=os.environ["OPENAI_API_KEY"],
@@ -96,6 +105,12 @@ class LlmClient:
 
             add_ons = self.db.get_add_ons()
             logger.info(f"Retrieved {len(add_ons)} add-ons")
+
+            # Get restaurant information
+            restaurant = self.db.get_restaurant()
+            logger.info(
+                f"Retrieved restaurant information: {restaurant.name if restaurant else 'None'}"
+            )
         except Exception as e:
             logger.error(f"Error retrieving menu data: {e}")
             import traceback
@@ -104,6 +119,7 @@ class LlmClient:
             # Use empty lists to avoid breaking the prompt
             menu_items = []
             add_ons = []
+            restaurant = None
 
         # Format menu information for the prompt
         menu_info = "## Our Delicious Menu\n"
@@ -135,7 +151,11 @@ class LlmClient:
 
         menu_info += "\nEverything is prepared fresh to order for pickup at our restaurant. What would you like to try today?"
 
-        menu_info += "\n\nPlease note: We are a PICKUP ONLY restaurant. Once your order is confirmed, we'll provide you with our pickup address and an estimated preparation time."
+        # Add restaurant information
+        if restaurant:
+            menu_info += f"\n\nPlease note: We are a PICKUP ONLY restaurant. You can pick up your order at {restaurant.name} located at {restaurant.address}. Our phone number is {restaurant.phone} and we're open {restaurant.opening_hours}."
+        else:
+            menu_info += "\n\nPlease note: We are a PICKUP ONLY restaurant. Once your order is confirmed, we'll provide you with our pickup address and an estimated preparation time."
 
         prompt = [
             {
@@ -149,15 +169,39 @@ You are a friendly and enthusiastic voice AI order assistant for Tote AI Restaur
 - [Be helpful] Guide customers through the ordering process with suggestions and explanations
 - [Be accurate] Always provide correct pricing and estimated preparation times
 - [Be proactive] Suggest popular combinations and ask about preferences
+- [Be efficient] Avoid repetition, especially with order confirmations
+- [Be respectful] Always use the customer's provided name, even if different from our records
+- [Be patient] Always wait for confirmation of one piece of information before asking for the next piece
 
 ## Response Guidelines
 - [Make recommendations] Suggest popular items and combinations
 - [Explain items] Describe ingredients and preparation methods when asked
 - [Handle modifications] Be flexible with order modifications and special requests
-- [Confirm details] Always confirm order details, including add-ons and special instructions
+- [Confirm details] Confirm order details ONLY ONCE, avoid repeating the same information
 - [Provide estimates] Give clear information about costs, preparation time, and pickup information
 - [Collect information] Gather necessary customer details in a friendly, conversational way
 - [Handle ASR errors] If you're unsure about what the customer said, politely ask for clarification
+- [Handle name discrepancies] If a customer's name differs from what's in the database, note it once but continue using their provided name
+- [Wait for confirmations] When asking the customer to confirm information (especially phone numbers), wait for their response before proceeding
+- [CRITICAL] When the customer confirms their phone number is correct, acknowledge it and immediately move on to menu presentation
+
+## Information Collection Process
+1. When collecting customer information:
+   - Ask for ONE piece of information at a time
+   - Wait for confirmation of that information before proceeding
+   - For phone numbers, ALWAYS wait for customer confirmation before moving to order taking
+   - IMPORTANT: After the customer confirms their phone number, DO NOT ask for confirmation again
+   - After phone number confirmation, say something like "Great! Let me tell you about our menu..." and proceed
+   - Only after confirmation of customer details, proceed to menu presentation or order taking
+
+## Handling Confirmation Responses
+1. If the user says "yes", "correct", "that's right", or similar confirmation:
+   - Acknowledge with "Great!" or "Perfect!"
+   - IMMEDIATELY transition to the next step (menu presentation)
+   - Never ask the same confirmation question again
+2. If in doubt about whether a confirmation was given:
+   - Assume it was confirmed and move on
+   - It's better to proceed than to get stuck in a confirmation loop
 
 ## Menu Presentation
 When discussing the menu:
@@ -172,12 +216,14 @@ When discussing the menu:
 ## Order Taking Process
 1. First show the basic menu without add-ons
 2. When a customer selects an item:
-   - Confirm their selection enthusiastically
+   - Confirm their selection once without repetition
    - Naturally introduce available add-ons
    - Ask if they'd like any customizations
 3. Repeat for each item in the order
 4. After the user has given the complete order:
-   - Confirm the complete items with add-ons
+   - Summarize and confirm the complete order ONLY ONCE
+   - Do not repeat the order confirmation again in the same message or in subsequent messages
+   - Wait for user confirmation before proceeding
    - Ask if they'd like to order anything else
 5. When order is complete:
    - Provide the pickup address and estimated preparation time
@@ -469,9 +515,20 @@ When discussing the menu:
 
                 if customer:
                     logger.info(f"Found existing customer: {customer.name}")
-                    response_text = f"Welcome back, {customer.name}! I found your information in our records. "
+
+                    # Compare provided name with name in database
+                    provided_name = name
+                    db_name = customer.name
+
+                    # Prepare response based on whether names match
+                    if provided_name.lower() == db_name.lower():
+                        response_text = f"Welcome back, {provided_name}! I found your information in our records. "
+                    else:
+                        # Note the discrepancy but continue using the customer's provided name
+                        response_text = f"Welcome back, {provided_name}! I have you in our records as {db_name}."
+
                     response_text += (
-                        f"Your phone number is {phone_str}, is that correct? "
+                        f" Your phone number is {phone_str}, is that correct? "
                     )
 
                     # Only include optional fields if they exist and have values
@@ -502,12 +559,58 @@ When discussing the menu:
                     )
                 else:
                     logger.info(f"No existing customer found for phone: {phone_str}")
-                    yield ResponseResponse(
-                        response_id=request.response_id,
-                        content=f"Nice to meet you, {name}! I've got your phone number as {phone_str}, is that correct? I don't have your information in our records yet. Let's start with your order. What would you like to order today?",
-                        content_complete=True,
-                        end_call=False,
-                    )
+
+                    # Check if this appears to be responding to a confirmation
+                    is_confirmation = False
+                    if len(request.transcript) >= 2:
+                        last_user_msg = request.transcript[-1].content.lower()
+                        last_agent_msg = (
+                            request.transcript[-2].content.lower()
+                            if request.transcript[-2].role == "agent"
+                            else ""
+                        )
+
+                        confirmation_phrases = [
+                            "yes",
+                            "correct",
+                            "that's right",
+                            "yeah",
+                            "yep",
+                            "yup",
+                            "sure",
+                            "confirm",
+                            "confirmed",
+                        ]
+                        if (
+                            any(
+                                phrase in last_user_msg
+                                for phrase in confirmation_phrases
+                            )
+                            and "is that correct" in last_agent_msg
+                        ):
+                            is_confirmation = True
+
+                    if is_confirmation:
+                        # If this is a confirmation response, provide menu options
+                        restaurant = self.db.get_restaurant()
+                        pickup_address = (
+                            restaurant.address if restaurant else "our restaurant"
+                        )
+
+                        yield ResponseResponse(
+                            response_id=request.response_id,
+                            content=f"Great! Thank you for confirming. Since you're new, let me tell you about our menu. We offer delicious burgers and pizzas, all available for pickup at {pickup_address}. What would you like to order today?",
+                            content_complete=True,
+                            end_call=False,
+                        )
+                    else:
+                        # Initial verification
+                        yield ResponseResponse(
+                            response_id=request.response_id,
+                            content=f"Nice to meet you, {name}! I've got your phone number as {phone_str}, is that correct?",
+                            content_complete=True,
+                            end_call=False,
+                        )
 
             elif func_call["func_name"] == "collect_customer_info":
                 func_call["arguments"] = json.loads(func_arguments)
@@ -580,13 +683,13 @@ When discussing the menu:
                         logger.info(f"Updating existing customer: {customer.name}")
                         try:
                             customer = self.db.update_customer(
-                                phone_str, **customer_data
+                                phone_str, auto_commit=True, **customer_data
                             )
-                            # Use the safe commit method
-                            if not self.db.safe_commit():
-                                logger.error(
-                                    "Failed to commit customer update after multiple retries"
-                                )
+                            # Safe commit is no longer needed as auto_commit=True will handle it
+                            # if not self.db.safe_commit():
+                            #    logger.error(
+                            #        "Failed to commit customer update after multiple retries"
+                            #    )
                         except Exception as e:
                             self.db.session.rollback()
                             logger.error(f"Error updating customer: {str(e)}")
@@ -597,12 +700,14 @@ When discussing the menu:
                         logger.info(f"Creating new customer with phone: {phone_str}")
                         customer_data["phone"] = phone_str
                         try:
-                            customer = self.db.create_customer(**customer_data)
-                            # Use the safe commit method
-                            if not self.db.safe_commit():
-                                logger.error(
-                                    "Failed to commit new customer creation after multiple retries"
-                                )
+                            customer = self.db.create_customer(
+                                **customer_data, auto_commit=True
+                            )
+                            # Use the safe commit method is no longer needed as auto_commit=True will handle it
+                            # if not self.db.safe_commit():
+                            #    logger.error(
+                            #        "Failed to commit new customer creation after multiple retries"
+                            #    )
                         except Exception as e:
                             self.db.session.rollback()
                             logger.error(f"Error creating customer: {str(e)}")
@@ -742,24 +847,29 @@ When discussing the menu:
                                 "payment_method"
                             ]
 
+                        # Get restaurant information for pickup address
+                        restaurant = self.db.get_restaurant()
+                        pickup_address = (
+                            restaurant.address
+                            if restaurant
+                            else "123 Main Street, Downtown, CA 94123"
+                        )
+
                         # Create order with transaction management
-                        order = self.db.create_order(**order_data)
+                        order = self.db.create_order(**order_data, auto_commit=True)
 
-                        # Use the safe commit method
-                        if not self.db.safe_commit():
-                            logger.error(
-                                "Failed to commit order creation after multiple retries"
-                            )
-                            raise Exception(
-                                "Failed to commit order after multiple retry attempts"
-                            )
-
-                        # Define the pickup address - this could be stored in a configuration or environment variable in a real application
-                        pickup_address = "123 Main Street, Downtown, CA 94123"
+                        pickup_phone = (
+                            restaurant.phone if restaurant else "(555) 123-4567"
+                        )
+                        pickup_hours = (
+                            restaurant.opening_hours
+                            if restaurant
+                            else "Monday-Sunday: 11:00 AM - 10:00 PM"
+                        )
 
                         yield ResponseResponse(
                             response_id=request.response_id,
-                            content=f"Great! I've placed your order. Your order number is #{order.id}. You can pick up your order at our restaurant located at {pickup_address}. Estimated preparation time is {order.estimated_preparation_time} minutes. Please bring your order number with you. Is there anything else you need?",
+                            content=f"Great! I've placed your order. Your order number is #{order.id}. You can pick up your order at our restaurant located at {pickup_address}. Our phone number is {pickup_phone} and we're open {pickup_hours}. Estimated preparation time is {order.estimated_preparation_time} minutes. Please bring your order number with you. Is there anything else you need?",
                             content_complete=True,
                             end_call=False,
                         )

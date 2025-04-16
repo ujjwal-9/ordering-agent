@@ -30,3 +30,4 @@ uvicorn==0.21.1
 python-multipart==0.0.9
 sqlalchemy>=2.0.0
 psycopg2-binary>=2.9.0
+PyJWT==2.10.1

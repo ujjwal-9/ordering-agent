@@ -18,6 +18,7 @@ const client = new Retell({
 // Voice webhook endpoint
 app.post("/voice-webhook", async (req, res) => {
   try {
+    console.log("Received request:", req);
     // Register the phone call to get call id
     const phoneCallResponse = await client.call.registerPhoneCall({
       agent_id: process.env.RETELL_AGENT_ID,
