@@ -22,6 +22,20 @@ import { fadeIn, staggerContainer } from "@/lib/animations";
 import { formatPrice, formatDate } from "@/lib/utils";
 import { Order, OrderStatus } from "@/lib/api/types";
 
+// Format phone number for display
+const formatPhoneNumber = (phone: string) => {
+  // Remove any non-digit characters
+  const digits = phone.replace(/\D/g, '');
+  
+  // Format as XXX-XXX-XXXX if it has 10 digits
+  if (digits.length === 10) {
+    return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+  }
+  
+  // Return original if not 10 digits
+  return phone;
+};
+
 export default function DashboardPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -37,76 +51,17 @@ export default function DashboardPage() {
       try {
         setIsLoading(true);
         
-        // Mock data for demo purposes
-        const mockOrders: Order[] = [
-          {
-            id: 1,
-            customer_name: "John Doe",
-            customer_phone: "555-1234",
-            order_items: [
-              {
-                menu_item_id: 1,
-                menu_item_name: "Cheeseburger",
-                quantity: 2,
-                base_price: 8.99,
-                total_price: 17.98
-              }
-            ],
-            total_amount: 17.98,
-            status: "pending",
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          },
-          {
-            id: 2,
-            customer_name: "Jane Smith",
-            customer_phone: "555-5678",
-            order_items: [
-              {
-                menu_item_id: 3,
-                menu_item_name: "Veggie Pizza",
-                quantity: 1,
-                base_price: 14.99,
-                total_price: 14.99
-              }
-            ],
-            total_amount: 14.99,
-            status: "confirmed",
-            created_at: new Date(Date.now() - 86400000).toISOString(),
-            updated_at: new Date(Date.now() - 86400000).toISOString()
-          },
-          {
-            id: 3,
-            customer_name: "Mike Johnson",
-            customer_phone: "555-9012",
-            order_items: [
-              {
-                menu_item_id: 5,
-                menu_item_name: "Chicken Wings",
-                quantity: 2,
-                base_price: 11.99,
-                total_price: 23.98
-              }
-            ],
-            total_amount: 23.98,
-            status: "delivered",
-            created_at: new Date(Date.now() - 172800000).toISOString(),
-            updated_at: new Date(Date.now() - 172800000).toISOString()
-          }
-        ];
-        
-        // In a real application, you would use this:
-        // const ordersData = await orderApi.getAll();
-        const ordersData = mockOrders;
+        // Fetch actual order data from API
+        const ordersData = await orderApi.getAll();
         
         setOrders(ordersData);
         
         // Calculate stats from orders
         setStats({
           totalOrders: ordersData.length,
-          pendingOrders: ordersData.filter(order => order.status === 'pending').length,
-          totalCustomers: new Set(ordersData.map(order => order.customer_phone)).size,
-          totalRevenue: ordersData.reduce((sum, order) => sum + order.total_amount, 0),
+          pendingOrders: ordersData.filter((order: Order) => order.status === 'pending').length,
+          totalCustomers: new Set(ordersData.map((order: Order) => order.customer_phone)).size,
+          totalRevenue: ordersData.reduce((sum: number, order: Order) => sum + order.total_amount, 0),
         });
       } catch (error) {
         console.error("Error fetching dashboard data:", error);
@@ -121,8 +76,8 @@ export default function DashboardPage() {
 
   const handleUpdateStatus = async (orderId: number, newStatus: OrderStatus) => {
     try {
-      // In a real application, you would use this:
-      // await orderApi.updateStatus(orderId, newStatus);
+      // Update order status via API
+      await orderApi.updateStatus(orderId, newStatus);
       
       // Update orders state
       setOrders(prevOrders => 
@@ -273,7 +228,7 @@ export default function DashboardPage() {
                         {order.customer_name}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {formatDate(order.created_at)}
+                        {formatDate(new Date(order.created_at))}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {formatPrice(order.total_amount)}
