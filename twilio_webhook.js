@@ -9,6 +9,7 @@ const VoiceResponse = twilio.twiml.VoiceResponse;
 // Create Express app
 const app = express();
 app.use(express.json());
+app.use(express.urlencoded({ extended: true })); // For parsing application/x-www-form-urlencoded
 
 // Initialize Retell client with API key from environment variable
 const client = new Retell({
@@ -18,11 +19,18 @@ const client = new Retell({
 // Voice webhook endpoint
 app.post("/voice-webhook", async (req, res) => {
   try {
-    console.log("Received request:", req);
+    // Extract phone numbers from request
+    const fromNumber = req.body.From || req.body.Caller;
+    const toNumber = req.body.To || req.body.Called;
+    
+    console.log("Phone numbers extracted:", { fromNumber, toNumber });
+    
     // Register the phone call to get call id
     const phoneCallResponse = await client.call.registerPhoneCall({
       agent_id: process.env.RETELL_AGENT_ID,
-      direction: "inbound", // optional
+      direction: "inbound",
+      from_number: fromNumber,
+      to_number: toNumber,
     });
     console.log(phoneCallResponse);
 

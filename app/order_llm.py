@@ -18,7 +18,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("db_operations")
 
-begin_sentence = "Welcome to Tote AI Restaurant! I'm your virtual order assistant. To get started, could you please tell me your name?"
+begin_sentence = "Welcome to Tote AI Restaurant! I'm your order assistant. To get started, could you please tell me your name?"
 
 agent_prompt = """Task: As a professional restaurant order assistant for Tote AI Restaurant, your role is to help customers place food orders efficiently and accurately. You should:
 
