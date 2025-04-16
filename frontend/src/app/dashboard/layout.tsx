@@ -9,10 +9,10 @@ import {
   ShoppingBag, 
   User, 
   Menu as MenuIcon, 
-  Package, 
   Settings, 
   LogOut,
-  X
+  X,
+  Users
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -26,7 +26,7 @@ interface DashboardLayoutProps {
 
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const router = useRouter();
-  const { isAuthenticated, logout, isLoading } = useAuth();
+  const { isAuthenticated, logout, isLoading, user } = useAuth();
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -47,14 +47,19 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     router.push("/login");
   };
 
-  const navItems = [
+  // Define base navigation items
+  let navItems = [
     { name: "Dashboard", href: "/dashboard", icon: <Home className="mr-2 h-4 w-4" /> },
     { name: "Orders", href: "/dashboard/orders", icon: <ShoppingBag className="mr-2 h-4 w-4" /> },
     { name: "Customers", href: "/dashboard/customers", icon: <User className="mr-2 h-4 w-4" /> },
     { name: "Menu Items", href: "/dashboard/menu", icon: <MenuIcon className="mr-2 h-4 w-4" /> },
-    { name: "Add-ons", href: "/dashboard/addons", icon: <Package className="mr-2 h-4 w-4" /> },
     { name: "Settings", href: "/dashboard/settings", icon: <Settings className="mr-2 h-4 w-4" /> },
   ];
+  
+  // Add Users management link for admins
+  if (user?.is_admin) {
+    navItems.splice(4, 0, { name: "Users", href: "/dashboard/users", icon: <Users className="mr-2 h-4 w-4" /> });
+  }
 
   return (
     <div className="flex min-h-screen bg-gray-50 dark:bg-gray-900">

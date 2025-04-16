@@ -317,6 +317,7 @@ async def get_addons(
             "id": addon.id,
             "name": addon.name,
             "category": addon.category,
+            "type": addon.type,
             "price": addon.price,
             "is_available": addon.is_available == 1,
             "created_at": addon.created_at,
@@ -330,6 +331,7 @@ async def get_addons(
 class AddOnCreate(BaseModel):
     name: str
     category: str
+    type: Optional[str] = None
     price: float
     is_available: Optional[bool] = True
 
@@ -337,6 +339,7 @@ class AddOnCreate(BaseModel):
 class AddOnUpdate(BaseModel):
     name: Optional[str] = None
     category: Optional[str] = None
+    type: Optional[str] = None
     price: Optional[float] = None
     is_available: Optional[bool] = None
 
@@ -351,6 +354,7 @@ async def create_addon(
         new_addon = AddOn(
             name=addon.name,
             category=addon.category,
+            type=addon.type,
             price=addon.price,
             is_available=1 if addon.is_available else 0,
         )
@@ -360,6 +364,7 @@ async def create_addon(
             "id": new_addon.id,
             "name": new_addon.name,
             "category": new_addon.category,
+            "type": new_addon.type,
             "price": new_addon.price,
             "is_available": new_addon.is_available == 1,
             "created_at": new_addon.created_at,
@@ -387,6 +392,8 @@ async def update_addon(
             existing_addon.name = addon.name
         if addon.category is not None:
             existing_addon.category = addon.category
+        if addon.type is not None:
+            existing_addon.type = addon.type
         if addon.price is not None:
             existing_addon.price = addon.price
         if addon.is_available is not None:
@@ -397,6 +404,7 @@ async def update_addon(
             "id": existing_addon.id,
             "name": existing_addon.name,
             "category": existing_addon.category,
+            "type": existing_addon.type,
             "price": existing_addon.price,
             "is_available": existing_addon.is_available == 1,
             "created_at": existing_addon.created_at,
@@ -534,6 +542,7 @@ async def get_order_by_id(
 
 class OrderStatusUpdate(BaseModel):
     status: str
+    estimated_preparation_time: Optional[int] = None
 
 
 # Update order status
@@ -544,10 +553,72 @@ async def update_order_status(
     current_user: User = Depends(get_current_user),
 ):
     db = Database()
-    updated_order = db.update_order_status(order_id, update.status)
-    if not updated_order:
-        raise HTTPException(status_code=404, detail="Order not found")
-    return {"message": f"Order status updated to {update.status}"}
+    try:
+        # Pass both status and estimated_preparation_time to the database method
+        updated_order = db.update_order_status(
+            order_id, update.status, update.estimated_preparation_time
+        )
+
+        if not updated_order:
+            raise HTTPException(status_code=404, detail="Order not found")
+
+        message = f"Order status updated to {update.status}"
+        if update.estimated_preparation_time is not None:
+            message += (
+                f" with {update.estimated_preparation_time} minutes preparation time"
+            )
+
+        # Get restaurant info for notifications
+        restaurant = db.get_restaurant()
+        restaurant_name = restaurant.name if restaurant else "Our Restaurant"
+        restaurant_address = restaurant.address if restaurant else "Our Location"
+
+        # Send SMS notification based on order status
+        if update.status == "ready":
+            try:
+                from app.twilio_service import send_order_ready_sms
+
+                # Send SMS notification
+                sms_result = send_order_ready_sms(
+                    updated_order.customer_phone, updated_order.id, restaurant_name
+                )
+
+                if sms_result["success"]:
+                    message += f" - SMS notification sent to customer"
+                else:
+                    print(f"SMS notification failed: {sms_result.get('error')}")
+            except Exception as sms_error:
+                # Log the error but don't fail the status update
+                print(f"Error sending SMS notification: {str(sms_error)}")
+
+        # Send SMS notification when order is confirmed
+        elif update.status == "confirmed":
+            try:
+                from app.twilio_service import send_order_confirmation_sms
+
+                # Only send if we have an estimated preparation time
+                if updated_order.estimated_preparation_time:
+                    # Send SMS notification
+                    sms_result = send_order_confirmation_sms(
+                        updated_order.customer_phone,
+                        updated_order.id,
+                        restaurant_name,
+                        restaurant_address,
+                        updated_order.estimated_preparation_time,
+                    )
+
+                    if sms_result["success"]:
+                        message += f" - Confirmation SMS sent to customer"
+                    else:
+                        print(f"Confirmation SMS failed: {sms_result.get('error')}")
+            except Exception as sms_error:
+                # Log the error but don't fail the status update
+                print(f"Error sending confirmation SMS: {str(sms_error)}")
+
+        return {"message": message}
+    except Exception as e:
+        db.session.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # API endpoint for customers
@@ -663,3 +734,52 @@ async def update_restaurant(
         raise HTTPException(
             status_code=400, detail=f"Failed to update restaurant information: {str(e)}"
         )
+
+
+class TimeUpdate(BaseModel):
+    minutes: int
+
+
+@app.post("/set-time/{order_id}")
+async def set_order_time(
+    order_id: int, time_data: TimeUpdate, current_user: User = Depends(get_current_user)
+):
+    db = Database()
+    try:
+        order = db.session.query(Order).filter(Order.id == order_id).first()
+        if not order:
+            raise HTTPException(status_code=404, detail="Order not found")
+
+        order.estimated_preparation_time = time_data.minutes
+        db.safe_commit()
+
+        # Get restaurant info for notifications
+        restaurant = db.get_restaurant()
+        restaurant_name = restaurant.name if restaurant else "Our Restaurant"
+
+        # Send SMS notification about time update
+        try:
+            from app.twilio_service import send_time_update_sms
+
+            # Send SMS notification
+            sms_result = send_time_update_sms(
+                order.customer_phone, order.id, restaurant_name, time_data.minutes
+            )
+
+            message = f"Order time set to {time_data.minutes} minutes"
+            if sms_result["success"]:
+                message += f" - Time update SMS sent to customer"
+            else:
+                print(f"Time update SMS failed: {sms_result.get('error')}")
+
+            return {"success": True, "message": message}
+        except Exception as sms_error:
+            # Log the error but don't fail the update
+            print(f"Error sending time update SMS: {str(sms_error)}")
+            return {
+                "success": True,
+                "message": f"Order time set to {time_data.minutes} minutes",
+            }
+    except Exception as e:
+        db.session.rollback()
+        raise HTTPException(status_code=500, detail=str(e))

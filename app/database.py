@@ -42,6 +42,7 @@ class AddOn(Base):
     name = Column(String, nullable=False)
     price = Column(Float, nullable=False)
     category = Column(String, nullable=False)  # 'burger', 'pizza', etc.
+    type = Column(String, nullable=True)  # 'topping', 'size', 'drink', etc.
     is_available = Column(Integer, default=1)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -445,10 +446,18 @@ class Database:
     def get_order_status(self, order_id):
         return self.session.query(Order).filter(Order.id == order_id).first()
 
-    def update_order_status(self, order_id, status):
+    def update_order_status(self, order_id, status, estimated_preparation_time=None):
         order = self.session.query(Order).filter(Order.id == order_id).first()
         if order:
             order.status = status
+
+            # Update estimated preparation time if provided
+            if estimated_preparation_time is not None:
+                print(
+                    f"Updating order {order_id} estimated_preparation_time to {estimated_preparation_time}"
+                )
+                order.estimated_preparation_time = estimated_preparation_time
+
             self.session.commit()
             return order
         return None

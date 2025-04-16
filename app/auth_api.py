@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Body
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
 from app.user_model import UserManager, User
 from app.database import Database
@@ -10,7 +10,6 @@ from fastapi import Header
 
 # Initialize router
 router = APIRouter(
-    prefix="/users",
     tags=["users"],
     responses={404: {"description": "Not found"}},
 )
@@ -31,6 +30,20 @@ class UserCreate(BaseModel):
     password: str
 
 
+class AdminUserCreate(BaseModel):
+    username: str
+    email: str
+    password: str
+    is_admin: Optional[bool] = False
+
+
+class UserUpdate(BaseModel):
+    username: Optional[str] = None
+    email: Optional[str] = None
+    is_active: Optional[bool] = None
+    is_admin: Optional[bool] = None
+
+
 class UserLogin(BaseModel):
     email: str
     password: str
@@ -43,6 +56,16 @@ class UserResponse(BaseModel):
     is_admin: bool
 
 
+# Full user response including all fields
+class FullUserResponse(BaseModel):
+    id: int
+    username: str
+    email: str
+    is_admin: bool
+    is_active: bool
+    created_at: str
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str
@@ -50,7 +73,7 @@ class TokenResponse(BaseModel):
 
 
 # Dependency to get the current user
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="users/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/users/login")
 
 
 async def get_current_user(authorization: str = Header(None)):
@@ -110,8 +133,18 @@ async def get_current_user(authorization: str = Header(None)):
         )
 
 
+# Dependency to check if user is admin
+def get_admin_user(current_user: User = Depends(get_current_user)):
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admin users can access this endpoint",
+        )
+    return current_user
+
+
 # User registration endpoint
-@router.post("/register", response_model=UserResponse)
+@router.post("/users/register", response_model=UserResponse)
 async def register(user_data: UserCreate):
     try:
         # Check if the database and user_manager are properly initialized
@@ -160,7 +193,7 @@ async def register(user_data: UserCreate):
 
 
 # User login endpoint with direct JSON body
-@router.post("/login", response_model=TokenResponse)
+@router.post("/users/login", response_model=TokenResponse)
 async def login(user_data: UserLogin):
     try:
         print(f"Login attempt for email: {user_data.email}")
@@ -200,41 +233,28 @@ async def login(user_data: UserLogin):
         raise
     except Exception as e:
         print(f"Error during login: {str(e)}")
-        db.rollback()  # Ensure transaction is rolled back for any error
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Login error: {str(e)}",
         )
 
 
-# OAuth compatible login endpoint for Swagger UI
-@router.post("/token", include_in_schema=False)
+# Form-based login for compatibility
+@router.post("/users/token", include_in_schema=False)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
-    try:
-        # OAuth form expects username field, but we use email
-        user = user_manager.authenticate_user(form_data.username, form_data.password)
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Incorrect username or password",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
-        # Generate token
-        token = user_manager.generate_token(user.id)
-
-        # Return token in the format expected by OAuth
-        return {"access_token": token, "token_type": "bearer"}
-    except Exception as e:
-        print(f"Error during OAuth login: {str(e)}")
+    user = user_manager.authenticate_user(form_data.username, form_data.password)
+    if not user:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Login error: {str(e)}",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
         )
+    access_token = user_manager.generate_token(user.id)
+    return {"access_token": access_token, "token_type": "bearer"}
 
 
 # Get current user info
-@router.get("/me", response_model=UserResponse)
+@router.get("/users/me", response_model=UserResponse)
 async def get_user_info(current_user: User = Depends(get_current_user)):
     return UserResponse(
         id=current_user.id,
@@ -244,52 +264,243 @@ async def get_user_info(current_user: User = Depends(get_current_user)):
     )
 
 
-# Update user info
-@router.put("/me", response_model=UserResponse)
+# Update current user's info
+@router.put("/users/me", response_model=UserResponse)
 async def update_user_info(
     user_update: dict, current_user: User = Depends(get_current_user)
 ):
     # Remove sensitive fields that shouldn't be updated directly
-    safe_update = {
-        k: v
-        for k, v in user_update.items()
-        if k not in ["id", "password_hash", "salt", "is_admin"]
-    }
+    if "is_admin" in user_update:
+        del user_update["is_admin"]
+    if "password" in user_update:
+        del user_update["password"]
 
-    updated_user = user_manager.update_user(current_user.id, **safe_update)
-    if not updated_user:
+    try:
+        db.begin_transaction()
+        updated_user = user_manager.update_user(current_user.id, **user_update)
+        db.commit()
+
+        if not updated_user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            )
+
+        return UserResponse(
+            id=updated_user.id,
+            username=updated_user.username,
+            email=updated_user.email,
+            is_admin=updated_user.is_admin,
+        )
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error updating user: {str(e)}",
+        )
+
+
+# Change password endpoint
+@router.post("/users/change-password")
+async def change_password(
+    password_change: dict, current_user: User = Depends(get_current_user)
+):
+    if (
+        "current_password" not in password_change
+        or "new_password" not in password_change
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Both current_password and new_password are required",
+        )
+
+    # Verify current password
+    user = user_manager.authenticate_user(
+        current_user.email, password_change["current_password"]
+    )
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Current password is incorrect",
+        )
+
+    try:
+        db.begin_transaction()
+        user_manager.update_user(
+            current_user.id, password=password_change["new_password"]
+        )
+        db.commit()
+        return {"message": "Password changed successfully"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error changing password: {str(e)}",
+        )
+
+
+# --- ADMIN ENDPOINTS ---
+
+
+# Get all users (admin only)
+@router.get("/admin/users", response_model=List[FullUserResponse])
+async def admin_get_all_users(current_user: User = Depends(get_admin_user)):
+    try:
+        users = db.session.query(User).all()
+        return [
+            FullUserResponse(
+                id=user.id,
+                username=user.username,
+                email=user.email,
+                is_admin=user.is_admin,
+                is_active=user.is_active,
+                created_at=user.created_at.isoformat() if user.created_at else "",
+            )
+            for user in users
+        ]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving users: {str(e)}",
+        )
+
+
+# Create new user (admin only)
+@router.post("/admin/users", response_model=FullUserResponse)
+async def admin_create_user(
+    user_data: AdminUserCreate, current_user: User = Depends(get_admin_user)
+):
+    try:
+        db.begin_transaction()
+
+        new_user = user_manager.register_user(
+            username=user_data.username,
+            email=user_data.email,
+            password=user_data.password,
+        )
+
+        if user_data.is_admin:
+            new_user.is_admin = True
+            db.session.commit()
+
+        if not db.commit():
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to commit the transaction",
+            )
+
+        return FullUserResponse(
+            id=new_user.id,
+            username=new_user.username,
+            email=new_user.email,
+            is_admin=new_user.is_admin,
+            is_active=new_user.is_active,
+            created_at=new_user.created_at.isoformat() if new_user.created_at else "",
+        )
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error creating user: {str(e)}",
+        )
+
+
+# Get user by ID (admin only)
+@router.get("/admin/users/{user_id}", response_model=FullUserResponse)
+async def admin_get_user(user_id: int, current_user: User = Depends(get_admin_user)):
+    user = user_manager.get_user_by_id(user_id)
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
-    return UserResponse(
-        id=updated_user.id,
-        username=updated_user.username,
-        email=updated_user.email,
-        is_admin=updated_user.is_admin,
+    return FullUserResponse(
+        id=user.id,
+        username=user.username,
+        email=user.email,
+        is_admin=user.is_admin,
+        is_active=user.is_active,
+        created_at=user.created_at.isoformat() if user.created_at else "",
     )
 
 
-# Change password
-@router.post("/change-password")
-async def change_password(
-    password_change: dict, current_user: User = Depends(get_current_user)
+# Update user by ID (admin only)
+@router.patch("/admin/users/{user_id}", response_model=FullUserResponse)
+async def admin_update_user(
+    user_id: int, user_data: UserUpdate, current_user: User = Depends(get_admin_user)
 ):
-    if "old_password" not in password_change or "new_password" not in password_change:
+    # Don't allow updating own admin status
+    if str(user_id) == str(current_user.id) and user_data.is_admin is False:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing old_password or new_password",
+            detail="Cannot remove your own admin privileges",
         )
 
-    # Verify old password
-    if not User.verify_password(
-        password_change["old_password"], current_user.password_hash, current_user.salt
-    ):
+    try:
+        db.begin_transaction()
+
+        # Convert to dict and remove None values
+        update_data = {k: v for k, v in user_data.dict().items() if v is not None}
+
+        # Update user
+        updated_user = user_manager.update_user(user_id, **update_data)
+
+        if not updated_user:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            )
+
+        db.commit()
+
+        return FullUserResponse(
+            id=updated_user.id,
+            username=updated_user.username,
+            email=updated_user.email,
+            is_admin=updated_user.is_admin,
+            is_active=updated_user.is_active,
+            created_at=(
+                updated_user.created_at.isoformat() if updated_user.created_at else ""
+            ),
+        )
+    except Exception as e:
+        db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect password"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error updating user: {str(e)}",
         )
 
-    # Update password
-    user_manager.update_user(current_user.id, password=password_change["new_password"])
 
-    return {"message": "Password updated successfully"}
+# Delete user by ID (admin only)
+@router.delete("/admin/users/{user_id}")
+async def admin_delete_user(user_id: int, current_user: User = Depends(get_admin_user)):
+    if str(user_id) == str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete your own account",
+        )
+
+    try:
+        user = user_manager.get_user_by_id(user_id)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            )
+
+        # Deactivate the user instead of hard delete
+        db.begin_transaction()
+        user.is_active = False
+        db.session.commit()
+        db.commit()
+
+        return {"message": "User deactivated successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error deleting user: {str(e)}",
+        )

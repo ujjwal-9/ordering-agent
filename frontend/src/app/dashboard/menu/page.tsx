@@ -59,6 +59,7 @@ export default function MenuPage() {
   const [addOnFormData, setAddOnFormData] = useState<AddOnCreate>({
     name: '',
     category: '',
+    type: '',
     price: 0,
     is_available: true
   });
@@ -249,6 +250,7 @@ export default function MenuPage() {
       setAddOnFormData({
         name: addon.name,
         category: addon.category,
+        type: addon.type || '',
         price: addon.price,
         is_available: addon.is_available
       });
@@ -263,6 +265,7 @@ export default function MenuPage() {
     setAddOnFormData({
       name: '',
       category: '',
+      type: '',
       price: 0,
       is_available: true
     });
@@ -412,6 +415,7 @@ export default function MenuPage() {
                   <TableHead>ID</TableHead>
                   <TableHead>Name</TableHead>
                   <TableHead>Category</TableHead>
+                  <TableHead>Type</TableHead>
                   <TableHead>Price</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Actions</TableHead>
@@ -420,7 +424,7 @@ export default function MenuPage() {
               <TableBody>
                 {addOns.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-8 text-gray-500">
+                    <TableCell colSpan={7} className="text-center py-8 text-gray-500">
                       No add-ons found. Add your first add-on to get started.
                     </TableCell>
                   </TableRow>
@@ -431,6 +435,13 @@ export default function MenuPage() {
                       <TableCell>{addon.name}</TableCell>
                       <TableCell>
                         <Badge variant="outline" className="capitalize">{addon.category}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        {addon.type ? (
+                          <Badge variant="secondary" className="capitalize">{addon.type}</Badge>
+                        ) : (
+                          <span className="text-gray-400">-</span>
+                        )}
                       </TableCell>
                       <TableCell>{formatPrice(addon.price)}</TableCell>
                       <TableCell>
@@ -579,6 +590,15 @@ export default function MenuPage() {
                 value={addOnFormData.category}
                 onChange={(e) => setAddOnFormData({...addOnFormData, category: e.target.value})}
                 placeholder="burger, pizza, etc."
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="addon-type">Type</Label>
+              <Input 
+                id="addon-type"
+                value={addOnFormData.type}
+                onChange={(e) => setAddOnFormData({...addOnFormData, type: e.target.value})}
+                placeholder="topping, size, sauce, etc."
               />
             </div>
             <div className="space-y-2">

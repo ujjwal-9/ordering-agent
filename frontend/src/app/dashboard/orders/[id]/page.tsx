@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import * as React from "react";
 import {
   ShoppingBag,
   Clock,
@@ -22,6 +23,8 @@ import { Separator } from "@/components/ui/separator";
 import { orderApi } from "@/lib/api/api-service";
 import { formatPrice, formatDate } from "@/lib/utils";
 import { Order, OrderStatus } from "@/lib/api/types";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 
 // Format phone number for display
 const formatPhoneNumber = (phone: string) => {
@@ -39,9 +42,15 @@ const formatPhoneNumber = (phone: string) => {
 
 export default function OrderDetailsPage({ params }: { params: { id: string } }) {
   const router = useRouter();
-  const orderId = parseInt(params.id);
+  
+  // Unwrap params using React.use() as recommended by Next.js
+  // We need to cast both the input and output for type safety during the Next.js transition
+  const unwrappedParams = React.use(params as any) as { id: string };
+  const orderId = parseInt(unwrappedParams.id);
   const [order, setOrder] = useState<Order | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [estimatedTime, setEstimatedTime] = useState<number>(30); // Default to 30 minutes
+  const [isConfirmingOrder, setIsConfirmingOrder] = useState(false);
 
   useEffect(() => {
     const fetchOrder = async () => {
@@ -58,6 +67,11 @@ export default function OrderDetailsPage({ params }: { params: { id: string } })
         }
         
         setOrder(orderData);
+        
+        // If order already has an estimated preparation time, use it
+        if (orderData.estimated_preparation_time) {
+          setEstimatedTime(orderData.estimated_preparation_time);
+        }
       } catch (error) {
         console.error("Error fetching order:", error);
         toast.error("Failed to load order details");
@@ -88,6 +102,51 @@ export default function OrderDetailsPage({ params }: { params: { id: string } })
     } catch (error) {
       console.error("Error updating order status:", error);
       toast.error("Failed to update order status");
+    }
+  };
+
+  const handleConfirmWithTime = async () => {
+    if (!order) return;
+    
+    try {
+      setIsLoading(true);
+      
+      // Use the enhanced status endpoint to update both status and time in one call
+      await orderApi.updateStatus(order.id, "confirmed", estimatedTime);
+      
+      // Update order state with both changes
+      setOrder({ 
+        ...order, 
+        status: "confirmed", 
+        estimated_preparation_time: estimatedTime 
+      });
+      
+      // Reset confirmation mode
+      setIsConfirmingOrder(false);
+      
+      toast.success(`Order #${order.id} confirmed with ${estimatedTime} minute preparation time`);
+    } catch (error) {
+      console.error("Error confirming order:", error);
+      toast.error("Failed to confirm order");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleUpdateEstimatedTime = async () => {
+    if (!order) return;
+    
+    try {
+      // Update the estimated preparation time
+      await orderApi.updateEstimatedTime(order.id, estimatedTime);
+      
+      // Update order state
+      setOrder({ ...order, estimated_preparation_time: estimatedTime });
+      
+      toast.success(`Updated estimated preparation time to ${estimatedTime} minutes`);
+    } catch (error) {
+      console.error("Error updating estimated time:", error);
+      toast.error("Failed to update estimated preparation time");
     }
   };
 
@@ -150,6 +209,12 @@ export default function OrderDetailsPage({ params }: { params: { id: string } })
             <Clock className="h-4 w-4 text-gray-500" />
             <span className="text-gray-500">{formatDate(new Date(order.created_at))}</span>
             {getStatusBadge(order.status)}
+            {order.estimated_preparation_time && (
+              <span className="text-sm text-gray-500">
+                <Clock className="h-3 w-3 inline mr-1" />
+                Est. {order.estimated_preparation_time} min
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -201,6 +266,12 @@ export default function OrderDetailsPage({ params }: { params: { id: string } })
                   <Phone className="h-4 w-4 text-gray-500" />
                   <span>{formatPhoneNumber(order.customer_phone)}</span>
                 </div>
+                {order.estimated_preparation_time && (
+                  <div className="flex items-center space-x-2">
+                    <Clock className="h-4 w-4 text-gray-500" />
+                    <span>Est. preparation time: {order.estimated_preparation_time} minutes</span>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -210,11 +281,11 @@ export default function OrderDetailsPage({ params }: { params: { id: string } })
               <CardTitle>Order Status</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {order.status === "pending" && (
+              {order.status === "pending" && !isConfirmingOrder && (
                 <>
                   <Button 
                     className="w-full"
-                    onClick={() => handleUpdateStatus("confirmed")}
+                    onClick={() => setIsConfirmingOrder(true)}
                   >
                     <CheckCircle2 className="h-4 w-4 mr-2" />
                     Confirm Order
@@ -229,13 +300,64 @@ export default function OrderDetailsPage({ params }: { params: { id: string } })
                   </Button>
                 </>
               )}
+              
+              {order.status === "pending" && isConfirmingOrder && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="confirm-estimated-time">Set Estimated Preparation Time (minutes)</Label>
+                    <Input
+                      id="confirm-estimated-time"
+                      type="number"
+                      min="1"
+                      value={estimatedTime}
+                      onChange={(e) => setEstimatedTime(parseInt(e.target.value) || 0)}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 pt-2">
+                    <Button 
+                      variant="outline"
+                      onClick={() => setIsConfirmingOrder(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button 
+                      onClick={handleConfirmWithTime}
+                    >
+                      Confirm Order
+                    </Button>
+                  </div>
+                </>
+              )}
+              
               {order.status === "confirmed" && (
-                <Button 
-                  className="w-full"
-                  onClick={() => handleUpdateStatus("preparing")}
-                >
-                  Begin Preparation
-                </Button>
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="estimated-time">Update Preparation Time (minutes)</Label>
+                    <div className="flex space-x-2">
+                      <Input
+                        id="estimated-time"
+                        type="number"
+                        min="1"
+                        value={estimatedTime}
+                        onChange={(e) => setEstimatedTime(parseInt(e.target.value) || 0)}
+                      />
+                      <Button 
+                        onClick={handleUpdateEstimatedTime}
+                        variant="outline"
+                      >
+                        Update
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="pt-2">
+                    <Button 
+                      className="w-full"
+                      onClick={() => handleUpdateStatus("preparing")}
+                    >
+                      Begin Preparation
+                    </Button>
+                  </div>
+                </>
               )}
               {order.status === "preparing" && (
                 <Button 
