@@ -36,39 +36,52 @@ agent_prompt = """Task: As a professional restaurant order assistant for Tote AI
 - Inform customers when a requested item is unavailable and suggest alternatives
 - Provide accurate pricing information for available items
 - Mention current special offers or promotions when applicable
-- Stick strictly to the items present in the menu and add-ons
-- You can't take special instructions, stick to what's available
+- NEVER recommend or suggest items that are not in the menu
+- Never make up or invent menu items that aren't available in the database
 
 3. Order Taking:
 - Guide customers through the ordering process
 - Only offer items that exist in the database AND are marked as available
-- Confirm item selections and add-ons when the customer has completed giving their full order
-- Collect customer details (name, phone)
+- DO NOT verify or confirm each item immediately after a customer selects it
+- Instead, acknowledge the item selection and ask if they'd like to order anything else
+- When a customer selects a menu item, present add-ons in a sequential fashion by type:
+  * FIRST: Present size options (if available)
+  * SECOND: Present sauce options (if available)
+  * THIRD: Present topping options (if available)
+  * For example, with pizza, first ask about size (small/medium/large), then ask about sauce preference, then toppings
+- Wait for customer's choice on each type of add-on before proceeding to the next type
+- When offering add-ons, always present them one category at a time and wait for customer's selection before moving to the next category
+- Collect the complete order first, asking "Would you like to order anything else?" after each item is fully specified
+- Only after customer indicates they have finished ordering (by saying "No", "That's all", etc.), summarize the complete order ONLY ONCE
+- After confirming the order is complete, collect customer details (name, phone) if not already provided
 - Inform customers this is a PICKUP ONLY restaurant (no delivery service)
-- AVOID repeating order confirmations - confirm the complete order ONLY ONCE
 
-4. Customer Service:
+4. Order Confirmation:
+- Only confirm the full order ONCE when the customer has finished ordering everything
+- Ask "Is there anything else you'd like to order?" to ensure the order is complete
+- Summarize and confirm the full order details, including prices, only after customer indicates the order is complete
+- After order is confirmed, proceed directly to payment and pickup information
+- NEVER re-confirm individual items or the complete order multiple times
+
+5. Customer Service:
 - Be friendly and professional
 - Handle modifications and special requests within available options
 - Provide clear pricing information
-- Confirm order details before finalizing
-- After order completion, provide the pickup address and estimated preparation time
+- After order completion, tell the customer the pickup address and tell them they will receive a text with the order details and estimated pickup time.
 
-5. Additional Information:
+6. Additional Information:
 - Mention current wait times for pickup
 - Explain payment options
 - Handle order tracking requests
 - Clearly communicate the pickup address when the order is confirmed
 
-6. CRITICAL - Avoiding Loops:
+7. CRITICAL - Avoiding Loops:
 - NEVER ask the same confirmation question twice
 - After a customer confirms information, acknowledge it and MOVE ON to the next step
 - If a customer says "yes," "correct," "that's right," or similar, immediately proceed to the next step
 - Do not get stuck in confirmation loops - always make forward progress in the conversation
 
-Conversational Style: Be friendly and efficient. Keep responses concise but informative. Use a warm, welcoming tone while maintaining professionalism. Don't put things in point wise fashion, rather take a more conversation flow approach. When asking for confirmations, wait for the user to respond before providing additional information - don't continue with more information until you get a response. Never confirm the same order details multiple times in a single message or across consecutive messages.
-
-Personality: Be helpful and attentive, but also efficient in taking orders. Show enthusiasm about the menu items while maintaining a professional demeanor."""
+Conversational Style: Be friendly and efficient. Keep responses concise but informative. Use a warm, welcoming tone while maintaining professionalism. Don't put things in point wise fashion, rather take a more conversation flow approach. When asking for confirmations, wait for the user to respond before providing additional information - don't continue with more information until you get a response. Never confirm the same order details multiple times in a single message or across consecutive messages."""
 
 
 class OrderAgent:
@@ -77,11 +90,21 @@ class OrderAgent:
             api_key=os.environ["OPENAI_API_KEY"],
         )
         self.db = Database()
+        self.from_number = None  # Store the caller's phone number from the request
+        self.verified_customer = None  # Store verified customer information
+
+    def set_from_number(self, from_number):
+        """Set the caller's phone number from the call request"""
+        self.from_number = from_number
+        logger.info(f"Set from_number: {self.from_number}")
 
     def draft_begin_message(self):
+        # Always ask for name first, regardless of whether we have from_number
+        welcome_msg = "Welcome to Tote AI Restaurant! I'm your order assistant. To get started, could you please tell me your name?"
+
         response = ResponseResponse(
             response_id=0,
-            content=begin_sentence,
+            content=welcome_msg,
             content_complete=True,
             end_call=False,
         )
@@ -97,6 +120,27 @@ class OrderAgent:
         return messages
 
     def prepare_prompt(self, request: ResponseRequiredRequest):
+        # Add from_number information to the prompt if we have it
+        current_prompt = (
+            super().prepare_prompt(request)
+            if hasattr(super(), "prepare_prompt")
+            else self.prepare_prompt_original(request)
+        )
+
+        # Inform the LLM about the from_number if available
+        if (
+            self.from_number
+            and len(current_prompt) > 0
+            and current_prompt[0]["role"] == "system"
+        ):
+            current_prompt[0][
+                "content"
+            ] += f"\n\nIMPORTANT: The caller's phone number is {self.from_number}. After asking for their name, use this number to check if they are an existing customer. Do not ask for their phone number unless explicitly instructed to do so."
+
+        return current_prompt
+
+    # Store the original prepare_prompt method
+    def prepare_prompt_original(self, request: ResponseRequiredRequest):
         # Get menu information from database
         logger.info("Retrieving menu information from database")
         try:
@@ -148,6 +192,44 @@ class OrderAgent:
                 if item.description:
                     menu_info += f" - {item.description}"
             menu_info += ".\n"
+
+        # Add add-on information by category and type
+        if add_ons:
+            menu_info += "\n## Our Add-ons\n"
+
+            # Group add-ons by category and type
+            grouped_addons = {}
+            for addon in add_ons:
+                if addon.category not in grouped_addons:
+                    grouped_addons[addon.category] = {}
+
+                addon_type = addon.type or "other"
+                if addon_type not in grouped_addons[addon.category]:
+                    grouped_addons[addon.category][addon_type] = []
+
+                grouped_addons[addon.category][addon_type].append(addon)
+
+            # Add grouped add-ons to menu info
+            for category, types in grouped_addons.items():
+                menu_info += f"\nFor our {category}s, we offer:\n"
+
+                # Order types: size first, then sauce, then toppings, then others
+                type_order = ["size", "sauce", "topping", "other"]
+
+                for addon_type in type_order:
+                    if addon_type in types and types[addon_type]:
+                        menu_info += f"- {addon_type.title()} options: "
+                        type_addons = types[addon_type]
+                        for i, addon in enumerate(type_addons):
+                            price_text = (
+                                f"${addon.price:.2f}"
+                                if addon.price != 0
+                                else "no extra charge"
+                            )
+                            if i > 0:
+                                menu_info += ", "
+                            menu_info += f"{addon.name} ({price_text})"
+                        menu_info += "\n"
 
         menu_info += "\nEverything is prepared fresh to order for pickup at our restaurant. What would you like to try today?"
 
@@ -216,19 +298,24 @@ When discussing the menu:
 ## Order Taking Process
 1. First show the basic menu without add-ons
 2. When a customer selects an item:
-   - Confirm their selection once without repetition
-   - Naturally introduce available add-ons
-   - Ask if they'd like any customizations
-3. Repeat for each item in the order
-4. After the user has given the complete order:
-   - Summarize and confirm the complete order ONLY ONCE
-   - Do not repeat the order confirmation again in the same message or in subsequent messages
-   - Wait for user confirmation before proceeding
-   - Ask if they'd like to order anything else
-5. When order is complete:
-   - Provide the pickup address and estimated preparation time
+   - Acknowledge their selection without asking for confirmation
+   - Guide them through add-on selections by type (size → sauce → toppings)
+   - After all add-ons are selected, simply ask "Would you like to order anything else?"
+   - DO NOT verify or confirm the item at this point
+3. Continue collecting all items the customer wants to order
+4. Only ask "Is that your complete order?" after the customer indicates they don't want anything else
+5. After the customer confirms the order is complete:
+   - ONLY THEN summarize the complete order ONCE with all items, add-ons and total price
+   - Wait for customer to confirm the complete order
+   - Never repeat the order confirmation again in the same message or in subsequent messages
+6. Tell the customer that the order is confirmed and they will receive a text with the order details and estimated pickup time.
+   - Close the interaction
 
-
+## Never Verify Each Item
+- When a customer selects an item with add-ons, only acknowledge the selection and move on
+- Do not ask "Do you want to confirm this item?" or similar verification questions
+- Save all confirmation for the END of the order process
+- Only after the customer says they don't want anything else, do a SINGLE confirmation of the entire order
 """
                 + menu_info
                 + "\n## Role\n"
@@ -460,6 +547,8 @@ When discussing the menu:
         prompt = self.prepare_prompt(request)
         func_call = {}
         func_arguments = ""
+
+        # Continue with normal OpenAI flow
         stream = await self.client.chat.completions.create(
             model=os.environ["OPENAI_MODEL"],
             messages=prompt,
@@ -496,121 +585,143 @@ When discussing the menu:
             if func_call["func_name"] == "verify_customer":
                 func_call["arguments"] = json.loads(func_arguments)
                 name = func_call["arguments"]["name"]
-                phone = func_call["arguments"]["phone"]
+                phone = func_call["arguments"].get("phone")
 
-                # Validate phone number
-                is_valid, phone_str, error_message = self._validate_phone_number(phone)
-                if not is_valid:
-                    logger.warning(f"Invalid phone number format: {phone}")
-                    yield ResponseResponse(
-                        response_id=request.response_id,
-                        content=error_message,
-                        content_complete=True,
-                        end_call=False,
-                    )
-                    return
-
-                logger.info(f"Verifying customer with phone: {phone_str}")
-                customer = self.db.get_customer_by_phone(phone_str)
-
-                if customer:
-                    logger.info(f"Found existing customer: {customer.name}")
-
-                    # Compare provided name with name in database
-                    provided_name = name
-                    db_name = customer.name
-
-                    # Prepare response based on whether names match
-                    if provided_name.lower() == db_name.lower():
-                        response_text = f"Welcome back, {provided_name}! I found your information in our records. "
-                    else:
-                        # Note the discrepancy but continue using the customer's provided name
-                        response_text = f"Welcome back, {provided_name}! I have you in our records as {db_name}."
-
-                    response_text += (
-                        f" Your phone number is {phone_str}, is that correct? "
+                # If phone wasn't provided in the function call but we have from_number, use it
+                if not phone and self.from_number:
+                    phone = self.from_number
+                    logger.info(
+                        f"Using from_number {phone} instead of asking for phone"
                     )
 
-                    # Only include optional fields if they exist and have values
-                    if (
-                        hasattr(customer, "preferred_payment_method")
-                        and customer.preferred_payment_method
-                    ):
-                        response_text += f"Your preferred payment method is {customer.preferred_payment_method}. "
-
-                    if (
-                        hasattr(customer, "dietary_preferences")
-                        and customer.dietary_preferences
-                    ):
-                        response_text += f"Your dietary preferences are {customer.dietary_preferences}. "
-
-                    if hasattr(customer, "total_orders"):
-                        response_text += (
-                            f"\nYou've placed {customer.total_orders} orders with us. "
+                # Proceed with verification only if we have a phone number
+                if phone:
+                    # Validate phone number
+                    is_valid, phone_str, error_message = self._validate_phone_number(
+                        phone
+                    )
+                    if not is_valid:
+                        logger.warning(f"Invalid phone number format: {phone}")
+                        yield ResponseResponse(
+                            response_id=request.response_id,
+                            content=error_message,
+                            content_complete=True,
+                            end_call=False,
                         )
+                        return
 
-                    response_text += "Is this information correct?"
+                    logger.info(f"Verifying customer with phone: {phone_str}")
+                    customer = self.db.get_customer_by_phone(phone_str)
 
-                    yield ResponseResponse(
-                        response_id=request.response_id,
-                        content=response_text,
-                        content_complete=True,
-                        end_call=False,
-                    )
-                else:
-                    logger.info(f"No existing customer found for phone: {phone_str}")
+                    if customer:
+                        logger.info(f"Found existing customer: {customer.name}")
+                        self.verified_customer = customer
 
-                    # Check if this appears to be responding to a confirmation
-                    is_confirmation = False
-                    if len(request.transcript) >= 2:
-                        last_user_msg = request.transcript[-1].content.lower()
-                        last_agent_msg = (
-                            request.transcript[-2].content.lower()
-                            if request.transcript[-2].role == "agent"
-                            else ""
-                        )
+                        # Compare provided name with name in database
+                        provided_name = name
+                        db_name = customer.name
 
-                        confirmation_phrases = [
-                            "yes",
-                            "correct",
-                            "that's right",
-                            "yeah",
-                            "yep",
-                            "yup",
-                            "sure",
-                            "confirm",
-                            "confirmed",
-                        ]
-                        if (
-                            any(
-                                phrase in last_user_msg
-                                for phrase in confirmation_phrases
+                        # Prepare response based on whether names match
+                        if provided_name.lower() == db_name.lower():
+                            response_text = f"Welcome back, {provided_name}! I found your information in our records. "
+                        else:
+                            # Note the discrepancy but continue using the customer's provided name
+                            response_text = f"Welcome back, {provided_name}! I have you in our records as {db_name}."
+
+                        # If we're using the from_number (not explicitly provided by customer), don't ask for confirmation
+                        if phone == self.from_number:
+                            response_text += " "
+                        else:
+                            response_text += (
+                                f" Your phone number is {phone_str}, is that correct? "
                             )
-                            and "is that correct" in last_agent_msg
-                        ):
-                            is_confirmation = True
 
-                    if is_confirmation:
-                        # If this is a confirmation response, provide menu options
-                        restaurant = self.db.get_restaurant()
-                        pickup_address = (
-                            restaurant.address if restaurant else "our restaurant"
-                        )
+                        # Only include optional fields if they exist and have values
+                        if (
+                            hasattr(customer, "preferred_payment_method")
+                            and customer.preferred_payment_method
+                        ):
+                            response_text += f"Your preferred payment method is {customer.preferred_payment_method}. "
+
+                        if (
+                            hasattr(customer, "dietary_preferences")
+                            and customer.dietary_preferences
+                        ):
+                            response_text += f"Your dietary preferences are {customer.dietary_preferences}. "
+
+                        if hasattr(customer, "total_orders"):
+                            response_text += f"\nYou've placed {customer.total_orders} orders with us. "
+
+                        # If we used the from_number, don't ask for confirmation but directly ask for order
+                        if phone == self.from_number:
+                            response_text += "What would you like to order today?"
+                        else:
+                            response_text += "Is this information correct?"
 
                         yield ResponseResponse(
                             response_id=request.response_id,
-                            content=f"Great! Thank you for confirming. Since you're new, let me tell you about our menu. We offer delicious burgers and pizzas, all available for pickup at {pickup_address}. What would you like to order today?",
+                            content=response_text,
                             content_complete=True,
                             end_call=False,
                         )
                     else:
-                        # Initial verification
-                        yield ResponseResponse(
-                            response_id=request.response_id,
-                            content=f"Nice to meet you, {name}! I've got your phone number as {phone_str}, is that correct?",
-                            content_complete=True,
-                            end_call=False,
+                        logger.info(
+                            f"No existing customer found for phone: {phone_str}"
                         )
+
+                        # If we're using from_number that's not in the database, we can register the customer
+                        if phone == self.from_number:
+                            # Register the new customer with the from_number
+                            try:
+                                customer_data = {
+                                    "name": name,
+                                    "phone": phone_str,
+                                }
+                                new_customer = self.db.create_customer(
+                                    **customer_data, auto_commit=True
+                                )
+                                logger.info(
+                                    f"Created new customer: {name} with phone: {phone_str}"
+                                )
+
+                                # Skip phone confirmation and go straight to menu
+                                restaurant = self.db.get_restaurant()
+                                pickup_address = (
+                                    restaurant.address
+                                    if restaurant
+                                    else "our restaurant"
+                                )
+
+                                yield ResponseResponse(
+                                    response_id=request.response_id,
+                                    content=f"Thank you, {name}! I've registered you as a new customer. Let me tell you about our menu. We offer delicious burgers and pizzas, all available for pickup at {pickup_address}. What would you like to order today?",
+                                    content_complete=True,
+                                    end_call=False,
+                                )
+                            except Exception as e:
+                                logger.error(f"Error creating new customer: {str(e)}")
+                                yield ResponseResponse(
+                                    response_id=request.response_id,
+                                    content=f"Thank you, {name}. What would you like to order today?",
+                                    content_complete=True,
+                                    end_call=False,
+                                )
+                        else:
+                            # For manually entered phone numbers, verify with the customer
+                            yield ResponseResponse(
+                                response_id=request.response_id,
+                                content=f"Nice to meet you, {name}! I've got your phone number as {phone_str}, is that correct?",
+                                content_complete=True,
+                                end_call=False,
+                            )
+                else:
+                    # If we don't have a phone number at all, need to ask for it
+                    yield ResponseResponse(
+                        response_id=request.response_id,
+                        content=f"Nice to meet you, {name}! Could you please provide your phone number so I can check if you're in our system?",
+                        content_complete=True,
+                        end_call=False,
+                    )
 
             elif func_call["func_name"] == "collect_customer_info":
                 func_call["arguments"] = json.loads(func_arguments)
@@ -804,16 +915,19 @@ When discussing the menu:
             elif func_call["func_name"] == "create_order":
                 func_call["arguments"] = json.loads(func_arguments)
                 try:
+                    # Get customer phone with priority: 1) function argument, 2) verified customer, 3) from_number
+                    customer_phone = func_call["arguments"].get("customer_phone")
+                    if not customer_phone and self.verified_customer:
+                        customer_phone = self.verified_customer.phone
+                    elif not customer_phone and self.from_number:
+                        customer_phone = self.from_number
+
                     # Validate phone number
                     is_valid, customer_phone_str, error_message = (
-                        self._validate_phone_number(
-                            func_call["arguments"]["customer_phone"]
-                        )
+                        self._validate_phone_number(customer_phone)
                     )
                     if not is_valid:
-                        logger.warning(
-                            f"Invalid phone number format: {func_call['arguments']['customer_phone']}"
-                        )
+                        logger.warning(f"Invalid phone number format: {customer_phone}")
                         yield ResponseResponse(
                             response_id=request.response_id,
                             content=error_message,
@@ -869,7 +983,7 @@ When discussing the menu:
 
                         yield ResponseResponse(
                             response_id=request.response_id,
-                            content=f"Great! I've placed your order. Your order number is #{order.id}. You can pick up your order at our restaurant located at {pickup_address}. Our phone number is {pickup_phone} and we're open {pickup_hours}. Estimated preparation time is {order.estimated_preparation_time} minutes. Please bring your order number with you. Is there anything else you need?",
+                            content=f"Great! I've placed your order. Your order number is #{order.id}. We will send you a confirmation text shortly along with order details and estimated pickup time. You can pick up your order at our restaurant located at {pickup_address}.",
                             content_complete=True,
                             end_call=False,
                         )
@@ -922,17 +1036,50 @@ When discussing the menu:
 
                     add_ons = self.db.get_add_ons(menu_item.category)
                     if add_ons:
-                        response_text = f"Excellent choice! The {menu_item.name} is one of our favorites. "
-                        response_text += (
-                            "You can make it even better with some delicious add-ons. "
+                        response_text = (
+                            f"Great! I've added the {menu_item.name} to your order. "
                         )
 
-                        if len(add_ons) > 1:
-                            response_text += f"We have {', '.join([addon.name for addon in add_ons[:-1]])}, and {add_ons[-1].name}. "
-                        else:
-                            response_text += f"We have {add_ons[0].name}. "
+                        # Group add-ons by type
+                        addon_by_type = {}
+                        for addon in add_ons:
+                            addon_type = addon.type or "other"
+                            if addon_type not in addon_by_type:
+                                addon_by_type[addon_type] = []
+                            addon_by_type[addon_type].append(addon)
 
-                        response_text += f"Each add-on is just ${add_ons[0].price:.2f}. Would you like to add any of these to your order?"
+                        # Start with asking about size if available
+                        if "size" in addon_by_type:
+                            size_options = addon_by_type["size"]
+                            response_text += "First, let's choose a size. "
+                            if len(size_options) > 1:
+                                response_text += f"We have {', '.join([addon.name for addon in size_options[:-1]])}, and {size_options[-1].name}. "
+                            else:
+                                response_text += f"We offer {size_options[0].name}. "
+                            response_text += "Which size would you prefer?"
+                        # If no size options, proceed to the next add-on type in sequence
+                        elif "sauce" in addon_by_type:
+                            sauce_options = addon_by_type["sauce"]
+                            response_text += "Let's talk about sauce options. "
+                            if len(sauce_options) > 1:
+                                response_text += f"We have {', '.join([addon.name for addon in sauce_options[:-1]])}, and {sauce_options[-1].name}. "
+                            else:
+                                response_text += f"We offer {sauce_options[0].name}. "
+                            response_text += "Which sauce would you like?"
+                        # If no size or sauce options, proceed to toppings
+                        elif "topping" in addon_by_type:
+                            topping_options = addon_by_type["topping"]
+                            response_text += (
+                                "You can add delicious toppings to your order. "
+                            )
+                            if len(topping_options) > 1:
+                                response_text += f"We have {', '.join([addon.name for addon in topping_options[:-1]])}, and {topping_options[-1].name}. "
+                            else:
+                                response_text += f"We offer {topping_options[0].name}. "
+                            response_text += "Would you like to add any toppings?"
+                        else:
+                            # If no add-ons by type, simply ask if they want anything else
+                            response_text += "Would you like to order anything else?"
 
                         yield ResponseResponse(
                             response_id=request.response_id,
@@ -943,7 +1090,7 @@ When discussing the menu:
                     else:
                         yield ResponseResponse(
                             response_id=request.response_id,
-                            content=f"Perfect choice! The {menu_item.name} is delicious as is. Would you like to order anything else?",
+                            content=f"Great! I've added the {menu_item.name} to your order. Would you like to order anything else?",
                             content_complete=True,
                             end_call=False,
                         )
@@ -983,3 +1130,51 @@ When discussing the menu:
                         total += addon.price * item["quantity"]
 
         return total
+
+    def verify_menu_item_function(self, params):
+        item_name = params.get("item_name", "")
+        category = params.get("category", None)
+
+        menu_item = self.db.find_similar_menu_item(item_name, category)
+        response = {"exists": False, "available": False, "similar_items": []}
+
+        if menu_item:
+            response["exists"] = True
+            response["menu_item"] = {
+                "id": menu_item.id,
+                "name": menu_item.name,
+                "category": menu_item.category,
+                "base_price": menu_item.base_price,
+                "description": menu_item.description,
+                "is_available": getattr(menu_item, "is_available", 1) == 1,
+            }
+            response["available"] = getattr(menu_item, "is_available", 1) == 1
+
+            # Get add-ons by category and organize by type
+            add_ons = self.db.get_add_ons(menu_item.category)
+            addon_by_type = {}
+
+            for addon in add_ons:
+                addon_type = addon.type or "other"
+                if addon_type not in addon_by_type:
+                    addon_by_type[addon_type] = []
+
+                addon_by_type[addon_type].append(
+                    {
+                        "id": addon.id,
+                        "name": addon.name,
+                        "price": addon.price,
+                        "type": addon_type,
+                        "is_available": getattr(addon, "is_available", 1) == 1,
+                    }
+                )
+
+            # Order the add-on types: size first, then sauce, then toppings
+            response["add_ons"] = {}
+            type_order = ["size", "sauce", "topping", "other"]
+
+            for addon_type in type_order:
+                if addon_type in addon_by_type:
+                    response["add_ons"][addon_type] = addon_by_type[addon_type]
+
+        return response

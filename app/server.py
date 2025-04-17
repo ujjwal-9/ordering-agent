@@ -120,7 +120,22 @@ async def websocket_handler(websocket: WebSocket, call_id: str):
             # Not all of them need to be handled, only response_required and reminder_required.
             if request_json["interaction_type"] == "call_details":
                 print(json.dumps(request_json, indent=2))
+
+                # Extract from_number from call_details if present
+                if "call" in request_json and "from_number" in request_json["call"]:
+                    from_number = request_json["call"]["from_number"]
+                    print(f"Incoming call from: {from_number}")
+
+                    # Format phone number (remove + and country code for 10-digit number)
+                    formatted_number = "".join(filter(str.isdigit, from_number))
+                    if len(formatted_number) > 10:
+                        formatted_number = formatted_number[-10:]
+
+                    # Store the formatted number in OrderAgent but don't verify yet
+                    llm_client.set_from_number(formatted_number)
+
                 return
+
             if request_json["interaction_type"] == "ping_pong":
                 await websocket.send_json(
                     {

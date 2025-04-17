@@ -83,12 +83,116 @@ def init_database():
 
     # Add add-ons
     add_ons = [
-        AddOn(name="Extra Cheese", category="burger", price=1.50, is_available=1),
-        AddOn(name="Bacon", category="burger", price=2.00, is_available=1),
-        AddOn(name="Avocado", category="burger", price=1.75, is_available=1),
-        AddOn(name="Extra Cheese", category="pizza", price=2.00, is_available=1),
-        AddOn(name="Mushrooms", category="pizza", price=1.50, is_available=1),
-        AddOn(name="Olives", category="pizza", price=1.50, is_available=1),
+        AddOn(
+            name="Extra Cheese",
+            category="burger",
+            price=1.50,
+            type="topping",
+            is_available=1,
+        ),
+        AddOn(
+            name="Bacon", category="burger", price=2.00, type="topping", is_available=1
+        ),
+        AddOn(
+            name="Avocado",
+            category="burger",
+            price=1.75,
+            type="topping",
+            is_available=1,
+        ),
+        AddOn(
+            name="Regular", category="burger", price=0.00, type="size", is_available=1
+        ),
+        AddOn(
+            name="Double Patty",
+            category="burger",
+            price=3.50,
+            type="size",
+            is_available=1,
+        ),
+        AddOn(
+            name="Regular Ketchup",
+            category="burger",
+            price=0.00,
+            type="sauce",
+            is_available=1,
+        ),
+        AddOn(
+            name="Spicy Mayo",
+            category="burger",
+            price=0.75,
+            type="sauce",
+            is_available=1,
+        ),
+        AddOn(
+            name="BBQ Sauce",
+            category="burger",
+            price=0.75,
+            type="sauce",
+            is_available=1,
+        ),
+        AddOn(
+            name="Extra Cheese",
+            category="pizza",
+            price=2.00,
+            type="topping",
+            is_available=1,
+        ),
+        AddOn(
+            name="Mushrooms",
+            category="pizza",
+            price=1.50,
+            type="topping",
+            is_available=1,
+        ),
+        AddOn(
+            name="Olives", category="pizza", price=1.50, type="topping", is_available=1
+        ),
+        AddOn(
+            name="Peppers", category="pizza", price=1.50, type="topping", is_available=1
+        ),
+        AddOn(
+            name='Small (8")',
+            category="pizza",
+            price=-2.00,
+            type="size",
+            is_available=1,
+        ),
+        AddOn(
+            name='Medium (12")',
+            category="pizza",
+            price=0.00,
+            type="size",
+            is_available=1,
+        ),
+        AddOn(
+            name='Large (16")',
+            category="pizza",
+            price=4.00,
+            type="size",
+            is_available=1,
+        ),
+        AddOn(
+            name="Regular Tomato",
+            category="pizza",
+            price=0.00,
+            type="sauce",
+            is_available=1,
+        ),
+        AddOn(
+            name="White Sauce",
+            category="pizza",
+            price=1.00,
+            type="sauce",
+            is_available=1,
+        ),
+        AddOn(
+            name="Spicy Tomato",
+            category="pizza",
+            price=0.75,
+            type="sauce",
+            is_available=1,
+        ),
     ]
 
     # Add sample customers
