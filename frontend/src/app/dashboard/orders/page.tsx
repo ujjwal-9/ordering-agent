@@ -25,6 +25,15 @@ import { Badge } from "@/components/ui/badge";
 import { orderApi } from "@/lib/api/api-service";
 import { Order, OrderStatus } from "@/lib/api/types";
 import { formatPrice, formatDate } from "@/lib/utils";
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogHeader, 
+  DialogTitle,
+  DialogFooter
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 
 // Format phone number for display
 const formatPhoneNumber = (phone: string) => {
@@ -44,6 +53,8 @@ export default function OrdersPage() {
   const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [confirmingOrderId, setConfirmingOrderId] = useState<number | null>(null);
+  const [estimatedTime, setEstimatedTime] = useState(30); // Default to 30 minutes
 
   useEffect(() => {
     fetchOrders();
@@ -77,6 +88,37 @@ export default function OrdersPage() {
     } catch (error) {
       console.error("Error updating order status:", error);
       toast.error("Failed to update order status");
+    }
+  };
+
+  const openConfirmDialog = (orderId: number) => {
+    setConfirmingOrderId(orderId);
+    setEstimatedTime(30); // Reset to default
+  };
+
+  const handleConfirmWithTime = async () => {
+    if (!confirmingOrderId) return;
+    
+    try {
+      // Use the enhanced status endpoint to update both status and time in one call
+      await orderApi.updateStatus(confirmingOrderId, "confirmed", estimatedTime);
+      
+      // Update orders state with both changes
+      setOrders(prevOrders => 
+        prevOrders.map(order => 
+          order.id === confirmingOrderId ? { 
+            ...order, 
+            status: "confirmed",
+            estimated_preparation_time: estimatedTime
+          } : order
+        )
+      );
+      
+      toast.success(`Order #${confirmingOrderId} confirmed with ${estimatedTime} minute preparation time`);
+      setConfirmingOrderId(null); // Close dialog
+    } catch (error) {
+      console.error("Error confirming order:", error);
+      toast.error("Failed to confirm order");
     }
   };
 
@@ -168,8 +210,8 @@ export default function OrdersPage() {
                   </div>
                 </TableCell>
                 <TableCell>
-                  {order.order_items.map((item) => (
-                    <div key={item.menu_item_id} className="text-sm">
+                  {order.order_items.map((item, index) => (
+                    <div key={`${item.menu_item_id}-${index}`} className="text-sm">
                       {item.quantity}x {item.menu_item_name}
                     </div>
                   ))}
@@ -185,7 +227,7 @@ export default function OrdersPage() {
                           size="sm" 
                           variant="outline" 
                           className="h-8"
-                          onClick={() => handleUpdateStatus(order.id, "confirmed")}
+                          onClick={() => openConfirmDialog(order.id)}
                         >
                           <CheckCircle2 className="h-4 w-4 mr-1" />
                           Confirm
@@ -238,6 +280,34 @@ export default function OrdersPage() {
           </TableBody>
         </Table>
       </div>
+
+      {/* Confirm Order Dialog */}
+      <Dialog open={confirmingOrderId !== null} onOpenChange={(open) => !open && setConfirmingOrderId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Set Preparation Time</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <div className="space-y-2">
+              <Label htmlFor="estimated-time">Estimated Preparation Time (minutes)</Label>
+              <Input
+                id="estimated-time"
+                type="number"
+                min="1"
+                value={estimatedTime}
+                onChange={(e) => setEstimatedTime(parseInt(e.target.value) || 30)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmingOrderId(null)}>Cancel</Button>
+            <Button onClick={handleConfirmWithTime}>
+              <Clock className="h-4 w-4 mr-2" />
+              Confirm Order
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 } 

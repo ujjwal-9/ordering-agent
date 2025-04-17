@@ -40,7 +40,7 @@ const formatPhoneNumber = (phone: string) => {
   return phone;
 };
 
-export default function OrderDetailsPage({ params }: { params: { id: string } }) {
+export default function OrderDetailsPage({ params }: any) {
   const router = useRouter();
   
   // Unwrap params using React.use() as recommended by Next.js

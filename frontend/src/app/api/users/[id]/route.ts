@@ -2,8 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  // context contains route params; use any to satisfy handler signature
+  context: any
 ) {
+  // Extract route params
+  const params = await context.params;
+  const userId = params.id;
   try {
     // Get auth token from request cookies or authorization header
     const token = request.cookies.get("auth_token")?.value || request.headers.get("authorization");
@@ -16,7 +20,6 @@ export async function GET(
       );
     }
 
-    const userId = params.id;
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
     // Log the API URL for debugging
     console.log(`Making request to: ${apiUrl}/admin/users/${userId}`);
@@ -35,7 +38,7 @@ export async function GET(
     const data = await response.json();
     return NextResponse.json(data);
   } catch (error) {
-    console.error(`Error fetching user ${params.id}:`, error);
+    console.error(`Error fetching user ${userId}:`, error);
     return NextResponse.json(
       { detail: "Failed to fetch user" },
       { status: 500 }
@@ -45,8 +48,11 @@ export async function GET(
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: any
 ) {
+  // Extract route params
+  const params = await context.params;
+  const userId = params.id;
   try {
     // Get auth token from request cookies or authorization header
     const token = request.cookies.get("auth_token")?.value || request.headers.get("authorization");
@@ -59,7 +65,6 @@ export async function PATCH(
       );
     }
 
-    const userId = params.id;
     const userData = await request.json();
 
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -83,7 +88,7 @@ export async function PATCH(
     const data = await response.json();
     return NextResponse.json(data);
   } catch (error) {
-    console.error(`Error updating user ${params.id}:`, error);
+    console.error(`Error updating user ${userId}:`, error);
     return NextResponse.json(
       { detail: "Failed to update user" },
       { status: 500 }
@@ -93,8 +98,12 @@ export async function PATCH(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  // context contains route params; use any to satisfy handler signature
+  context: any
 ) {
+  // Extract route params
+  const params = await context.params;
+  const userId = params.id;
   try {
     // Get auth token from request cookies or authorization header
     const token = request.cookies.get("auth_token")?.value || request.headers.get("authorization");
@@ -107,7 +116,6 @@ export async function DELETE(
       );
     }
 
-    const userId = params.id;
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
     // Log the API URL for debugging
     console.log(`Making request to: ${apiUrl}/admin/users/${userId}`);
@@ -126,7 +134,7 @@ export async function DELETE(
 
     return new NextResponse(null, { status: 204 });
   } catch (error) {
-    console.error(`Error deleting user ${params.id}:`, error);
+    console.error(`Error deleting user ${userId}:`, error);
     return NextResponse.json(
       { detail: "Failed to delete user" },
       { status: 500 }
