@@ -23,28 +23,6 @@ import {
   textVariant
 } from "@/lib/animations";
 
-// Mock testimonials
-const testimonials = [
-  {
-    id: 1,
-    name: "Emily Johnson",
-    text: "This ordering system has transformed how we manage our restaurant. The interface is intuitive and our staff picked it up in no time!",
-    role: "Restaurant Owner"
-  },
-  {
-    id: 2,
-    name: "David Chen",
-    text: "The ability to manage orders in real-time has significantly improved our kitchen's efficiency. We're serving customers faster than ever.",
-    role: "Head Chef"
-  },
-  {
-    id: 3,
-    name: "Sarah Thompson",
-    text: "Customer information management is seamless. We can now provide personalized service based on preferences and order history.",
-    role: "Operations Manager"
-  }
-];
-
 // Mock features
 const features = [
   {
@@ -122,7 +100,7 @@ export default function LandingPage() {
               <Button 
                 variant="outline" 
                 size="lg" 
-                className="px-8 py-6 text-lg rounded-full border-white text-white hover:bg-white hover:text-gray-950"
+                className="px-8 py-6 text-lg rounded-full bg-transparent border-white text-white hover:bg-white hover:text-gray-950 border-2"
               >
                 Login
               </Button>
@@ -182,48 +160,6 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
-
-      {/* Testimonials */}
-      <section className="py-20 bg-gray-50">
-        <div className="container mx-auto px-4">
-          <motion.div 
-            variants={fadeIn("up", 0.2)}
-            initial="hidden"
-            whileInView="show"
-            viewport={{ once: false, amount: 0.1 }}
-            className="text-center mb-16"
-          >
-            <h2 className="text-3xl md:text-4xl font-bold mb-4">What Our Customers Say</h2>
-            <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-              Don't take our word for it – hear from restaurant owners who use our platform.
-            </p>
-          </motion.div>
-          
-          <div className="grid md:grid-cols-3 gap-8 max-w-6xl mx-auto">
-            {testimonials.map((testimonial, index) => (
-              <motion.div
-                key={testimonial.id}
-                variants={fadeIn(index === 0 ? "left" : index === 2 ? "right" : "up", 0.3 + index * 0.1)}
-                initial="hidden"
-                whileInView="show"
-                viewport={{ once: false, amount: 0.1 }}
-                className="bg-white p-6 rounded-lg shadow-md"
-              >
-                <div className="flex items-center mb-4">
-                  <div className="w-12 h-12 bg-primary text-white rounded-full flex items-center justify-center font-bold text-lg">
-                    {testimonial.name.split(' ').map(name => name[0]).join('')}
-                  </div>
-                  <div className="ml-4">
-                    <h4 className="font-bold">{testimonial.name}</h4>
-                    <p className="text-gray-600 text-sm">{testimonial.role}</p>
-                  </div>
-                </div>
-                <p className="text-gray-700">"{testimonial.text}"</p>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      </section>
       
       {/* CTA Section */}
       <section className="py-20 bg-primary text-white">
@@ -252,8 +188,7 @@ export default function LandingPage() {
               <Link href="/register">
                 <Button 
                   size="lg" 
-                  variant="secondary"
-                  className="px-8 py-6 text-lg rounded-full"
+                  className="px-8 py-6 text-lg rounded-full bg-white text-primary hover:bg-gray-100"
                 >
                   Start Your Free Trial <ChevronRight className="ml-2 h-5 w-5" />
                 </Button>
