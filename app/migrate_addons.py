@@ -19,7 +19,6 @@ def migrate():
         database_url = (
             f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
         )
-        print(f"Using database URL: {database_url}")
 
         # Create engine
         engine = create_engine(database_url)

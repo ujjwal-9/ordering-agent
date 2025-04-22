@@ -17,7 +17,10 @@ from datetime import datetime
 import os
 import json
 import time
+import dotenv
 from app.user_model import User, Base as UserBase
+
+dotenv.load_dotenv(dotenv_path="../.env")
 
 Base = declarative_base()
 
@@ -113,8 +116,6 @@ class Database:
             database_url = (
                 f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
             )
-            print(f"Using database URL: {database_url}")
-
             self.engine = create_engine(database_url)
 
             # Create all tables including User table from user_model
