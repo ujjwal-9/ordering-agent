@@ -1,4 +1,4 @@
-from app.user_model import UserManager, User
+from app.db_operations import UserManager, User
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 import os

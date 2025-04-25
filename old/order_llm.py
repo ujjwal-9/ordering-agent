@@ -9,6 +9,7 @@ from .custom_types import (
 )
 from typing import List, Tuple, Optional
 from .database import Database
+from .memory import ConversationBufferMemory
 
 # Configure logging
 logging.basicConfig(
@@ -92,15 +93,20 @@ class OrderAgent:
         self.db = Database()
         self.from_number = None  # Store the caller's phone number from the request
         self.verified_customer = None  # Store verified customer information
+        self.memory = ConversationBufferMemory()  # Initialize conversation memory
 
     def set_from_number(self, from_number):
         """Set the caller's phone number from the call request"""
         self.from_number = from_number
+        self.memory.update_customer_info(phone=from_number)
         logger.info(f"Set from_number: {self.from_number}")
 
     def draft_begin_message(self):
         # Always ask for name first, regardless of whether we have from_number
         welcome_msg = "Welcome to Tote AI Restaurant! I'm your order assistant. To get started, could you please tell me your name?"
+
+        # Add the welcome message to memory
+        self.memory.add_message("assistant", welcome_msg)
 
         response = ResponseResponse(
             response_id=0,
@@ -115,17 +121,36 @@ class OrderAgent:
         for utterance in transcript:
             if utterance.role == "agent":
                 messages.append({"role": "assistant", "content": utterance.content})
+                self.memory.add_message("assistant", utterance.content)
             else:
                 messages.append({"role": "user", "content": utterance.content})
+                self.memory.add_message("user", utterance.content)
         return messages
 
     def prepare_prompt(self, request: ResponseRequiredRequest):
         # Add from_number information to the prompt if we have it
-        current_prompt = (
-            super().prepare_prompt(request)
-            if hasattr(super(), "prepare_prompt")
-            else self.prepare_prompt_original(request)
-        )
+        current_prompt = self.base_prompt(request)
+
+        # Add memory context to the prompt
+        context_summary = self.memory.get_context_summary()
+        if len(current_prompt) > 0 and current_prompt[0]["role"] == "system":
+            current_prompt[0]["content"] += "\n\nCurrent Conversation Context:\n"
+            if context_summary["customer_info"]["name"]:
+                current_prompt[0][
+                    "content"
+                ] += f"Customer Name: {context_summary['customer_info']['name']}\n"
+            if context_summary["customer_info"]["phone"]:
+                current_prompt[0][
+                    "content"
+                ] += f"Customer Phone: {context_summary['customer_info']['phone']}\n"
+            if context_summary["verified_customer"]:
+                current_prompt[0]["content"] += "Customer is verified.\n"
+            if context_summary["current_order"]["items"]:
+                current_prompt[0][
+                    "content"
+                ] += f"Current Order Items: {', '.join([item['name'] for item in context_summary['current_order']['items']])}\n"
+            if context_summary["order_confirmed"]:
+                current_prompt[0]["content"] += "Order has been confirmed.\n"
 
         # Inform the LLM about the from_number if available
         if (
@@ -140,7 +165,7 @@ class OrderAgent:
         return current_prompt
 
     # Store the original prepare_prompt method
-    def prepare_prompt_original(self, request: ResponseRequiredRequest):
+    def base_prompt(self, request: ResponseRequiredRequest):
         # Get menu information from database
         logger.info("Retrieving menu information from database")
         try:
@@ -348,10 +373,6 @@ When discussing the menu:
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "name": {
-                                "type": "string",
-                                "description": "The name of the customer",
-                            },
                             "phone": {
                                 "type": "integer",
                                 "description": "The phone number of the customer (must be a number without spaces or special characters)",
@@ -371,7 +392,7 @@ When discussing the menu:
                         "properties": {
                             "step": {
                                 "type": "string",
-                                "description": "The current step of information collection (phone, name, email, payment_method, dietary_preferences)",
+                                "description": "The current step of information collection (phone, name, email)",
                             },
                             "phone": {
                                 "type": "integer",
@@ -384,14 +405,6 @@ When discussing the menu:
                             "email": {
                                 "type": "string",
                                 "description": "The customer's email address",
-                            },
-                            "preferred_payment_method": {
-                                "type": "string",
-                                "description": "The customer's preferred payment method",
-                            },
-                            "dietary_preferences": {
-                                "type": "string",
-                                "description": "Any dietary preferences or restrictions",
                             },
                         },
                         "required": ["step"],
@@ -496,7 +509,7 @@ When discussing the menu:
             {
                 "type": "function",
                 "function": {
-                    "name": "get_item_addons",
+                    "name": "fetch_addons",
                     "description": "Get available add-ons for a specific menu item.",
                     "parameters": {
                         "type": "object",
@@ -507,6 +520,30 @@ When discussing the menu:
                             },
                         },
                         "required": ["item_name"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "fetch_menu",
+                    "description": "Fetch all available menu items organized by category.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "fetch_restaurant_info",
+                    "description": "Fetch restaurant information including address, phone, and hours.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
                     },
                 },
             },
@@ -540,7 +577,7 @@ When discussing the menu:
             return (
                 False,
                 None,
-                "That doesn't appear to be a valid phone number. Please provide a 10-digit number without spaces or special characters.",
+                "That doesn't appear to be a valid phone number. Please provide a 10-digit number using only numbers 0-9.",
             )
 
     async def draft_response(self, request: ResponseRequiredRequest):
@@ -556,6 +593,7 @@ When discussing the menu:
             tools=self.prepare_functions(),
         )
 
+        response_content = ""
         async for chunk in stream:
             if len(chunk.choices) == 0:
                 continue
@@ -573,6 +611,7 @@ When discussing the menu:
                     func_arguments += tool_calls.function.arguments or ""
 
             if chunk.choices[0].delta.content:
+                response_content += chunk.choices[0].delta.content
                 response = ResponseResponse(
                     response_id=request.response_id,
                     content=chunk.choices[0].delta.content,
@@ -581,11 +620,19 @@ When discussing the menu:
                 )
                 yield response
 
+        # Add the complete response to memory
+        if response_content:
+            self.memory.add_message("assistant", response_content)
+
         if func_call:
+            # Process function calls and update memory accordingly
             if func_call["func_name"] == "verify_customer":
                 func_call["arguments"] = json.loads(func_arguments)
-                name = func_call["arguments"]["name"]
                 phone = func_call["arguments"].get("phone")
+                name = func_call["arguments"].get("name")
+
+                if name:
+                    self.memory.update_customer_info(name=name)
 
                 # If phone wasn't provided in the function call but we have from_number, use it
                 if not phone and self.from_number:
@@ -635,22 +682,6 @@ When discussing the menu:
                             response_text += (
                                 f" Your phone number is {phone_str}, is that correct? "
                             )
-
-                        # Only include optional fields if they exist and have values
-                        if (
-                            hasattr(customer, "preferred_payment_method")
-                            and customer.preferred_payment_method
-                        ):
-                            response_text += f"Your preferred payment method is {customer.preferred_payment_method}. "
-
-                        if (
-                            hasattr(customer, "dietary_preferences")
-                            and customer.dietary_preferences
-                        ):
-                            response_text += f"Your dietary preferences are {customer.dietary_preferences}. "
-
-                        if hasattr(customer, "total_orders"):
-                            response_text += f"\nYou've placed {customer.total_orders} orders with us. "
 
                         # If we used the from_number, don't ask for confirmation but directly ask for order
                         if phone == self.from_number:
@@ -714,15 +745,6 @@ When discussing the menu:
                                 content_complete=True,
                                 end_call=False,
                             )
-                else:
-                    # If we don't have a phone number at all, need to ask for it
-                    yield ResponseResponse(
-                        response_id=request.response_id,
-                        content=f"Nice to meet you, {name}! Could you please provide your phone number so I can check if you're in our system?",
-                        content_complete=True,
-                        end_call=False,
-                    )
-
             elif func_call["func_name"] == "collect_customer_info":
                 func_call["arguments"] = json.loads(func_arguments)
                 step = func_call["arguments"]["step"]
@@ -739,22 +761,6 @@ When discussing the menu:
                     yield ResponseResponse(
                         response_id=request.response_id,
                         content="Would you like to provide an email address for order updates? (optional)",
-                        content_complete=True,
-                        end_call=False,
-                    )
-
-                elif step == "payment_method":
-                    yield ResponseResponse(
-                        response_id=request.response_id,
-                        content="What is your preferred payment method? (cash, credit card, or digital payment)",
-                        content_complete=True,
-                        end_call=False,
-                    )
-
-                elif step == "dietary_preferences":
-                    yield ResponseResponse(
-                        response_id=request.response_id,
-                        content="Do you have any dietary preferences or restrictions? (e.g., vegetarian, no-pork, etc.)",
                         content_complete=True,
                         end_call=False,
                     )
@@ -782,12 +788,6 @@ When discussing the menu:
                     customer_data = {
                         "name": func_call["arguments"]["name"],
                         "email": func_call["arguments"].get("email"),
-                        "preferred_payment_method": func_call["arguments"].get(
-                            "preferred_payment_method"
-                        ),
-                        "dietary_preferences": func_call["arguments"].get(
-                            "dietary_preferences"
-                        ),
                     }
 
                     if customer:
@@ -1018,7 +1018,7 @@ When discussing the menu:
                     end_call=True,
                 )
 
-            elif func_call["func_name"] == "get_item_addons":
+            elif func_call["func_name"] == "fetch_addons":
                 func_call["arguments"] = json.loads(func_arguments)
                 item_name = func_call["arguments"]["item_name"]
                 menu_item = self.db.find_similar_menu_item(item_name)
@@ -1178,3 +1178,98 @@ When discussing the menu:
                     response["add_ons"][addon_type] = addon_by_type[addon_type]
 
         return response
+
+    def fetch_menu_function(self, params=None):
+        """
+        Fetch all available menu items organized by category.
+        Returns a dictionary with menu items grouped by category.
+        """
+        try:
+            menu_items = self.db.get_menu()
+            menu_by_category = {}
+
+            for item in menu_items:
+                # Only include available items
+                if getattr(item, "is_available", 1) == 1:
+                    if item.category not in menu_by_category:
+                        menu_by_category[item.category] = []
+
+                    menu_by_category[item.category].append(
+                        {
+                            "id": item.id,
+                            "name": item.name,
+                            "category": item.category,
+                            "base_price": item.base_price,
+                            "description": item.description,
+                            "is_available": True,
+                        }
+                    )
+
+            return {"success": True, "menu": menu_by_category}
+        except Exception as e:
+            logger.error(f"Error fetching menu: {str(e)}")
+            return {"success": False, "error": "Failed to fetch menu items"}
+
+    def fetch_addons_function(self, params):
+        """
+        Fetch add-ons for a specific category or all add-ons if no category specified.
+        params:
+            - category (optional): The category to fetch add-ons for
+        """
+        try:
+            category = params.get("category")
+            add_ons = self.db.get_add_ons(category)
+
+            # Organize add-ons by type
+            addon_by_type = {}
+            for addon in add_ons:
+                if getattr(addon, "is_available", 1) == 1:
+                    addon_type = addon.type or "other"
+                    if addon_type not in addon_by_type:
+                        addon_by_type[addon_type] = []
+
+                    addon_by_type[addon_type].append(
+                        {
+                            "id": addon.id,
+                            "name": addon.name,
+                            "price": addon.price,
+                            "type": addon_type,
+                            "category": addon.category,
+                            "is_available": True,
+                        }
+                    )
+
+            # Order the add-on types
+            ordered_addons = {}
+            type_order = ["size", "sauce", "topping", "other"]
+            for addon_type in type_order:
+                if addon_type in addon_by_type:
+                    ordered_addons[addon_type] = addon_by_type[addon_type]
+
+            return {"success": True, "add_ons": ordered_addons, "category": category}
+        except Exception as e:
+            logger.error(f"Error fetching add-ons: {str(e)}")
+            return {"success": False, "error": "Failed to fetch add-ons"}
+
+    def fetch_restaurant_info_function(self, params=None):
+        """
+        Fetch restaurant information including address, phone, and hours.
+        """
+        try:
+            restaurant = self.db.get_restaurant()
+            if restaurant:
+                return {
+                    "success": True,
+                    "restaurant": {
+                        "name": restaurant.name,
+                        "address": restaurant.address,
+                        "phone": restaurant.phone,
+                        "opening_hours": restaurant.opening_hours,
+                        "pickup_only": True,  # Hardcoded as this is a pickup-only restaurant
+                    },
+                }
+            else:
+                return {"success": False, "error": "Restaurant information not found"}
+        except Exception as e:
+            logger.error(f"Error fetching restaurant info: {str(e)}")
+            return {"success": False, "error": "Failed to fetch restaurant information"}

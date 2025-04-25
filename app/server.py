@@ -22,10 +22,17 @@ from app.custom_types import (
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any, Union
 
-from app.order_llm import OrderAgent
+from app.agent.order_agent import OrderAgent
 from app.auth_api import router as auth_router, get_current_user
-from app.user_model import User, UserManager
-from app.database import Database, MenuItem, AddOn, Restaurant, Order, Customer
+from app.db_operations import (
+    User,
+    UserManager,
+    Database,
+    MenuItem,
+    AddOn,
+    Restaurant,
+    Customer,
+)
 
 load_dotenv(override=True)
 app = FastAPI()
@@ -649,8 +656,6 @@ async def get_customers(current_user: User = Depends(get_current_user)):
             "name": customer.name,
             "phone": customer.phone,
             "email": customer.email,
-            "preferred_payment_method": customer.preferred_payment_method,
-            "dietary_preferences": customer.dietary_preferences,
             "last_order_date": customer.last_order_date,
             "total_orders": customer.total_orders,
             "created_at": customer.created_at,
@@ -676,8 +681,6 @@ class CustomerUpdate(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
-    preferred_payment_method: Optional[str] = None
-    dietary_preferences: Optional[str] = None
 
 
 # Update customer information

@@ -194,10 +194,14 @@ class UserManager:
 
 # Initialize the database if this module is run directly
 if __name__ == "__main__":
-    database_url = os.getenv(
-        "DATABASE_URL",
-        "postgresql://postgres:postgres@localhost:5432/tote",
-    )
+    db_user = os.getenv("DATABASE_USER", "postgres")
+    db_password = os.getenv("DATABASE_PASSWORD", "postgres")
+    db_host = os.getenv("DATABASE_HOST", "localhost")
+    db_port = os.getenv("DATABASE_PORT", "5432")
+    db_name = os.getenv("DATABASE_NAME", "tote")
+
+    # Build the connection string
+    database_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
     engine = create_engine(database_url)
 
     # Create all tables
@@ -218,7 +222,7 @@ if __name__ == "__main__":
         try:
             admin_user = user_manager.register_user(
                 username="admin",
-                email="admin@example.com",
+                email="admin@tote.ai",
                 password="admin123",  # This should be a secure password in production
             )
             admin_user.is_admin = True

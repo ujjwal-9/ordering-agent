@@ -18,7 +18,7 @@ import os
 import json
 import time
 import dotenv
-from app.user_model import User, Base as UserBase
+from .user_model import User, Base as UserBase
 
 dotenv.load_dotenv(dotenv_path="../.env")
 
@@ -77,8 +77,6 @@ class Customer(Base):
     name = Column(String, nullable=False)
     phone = Column(String, nullable=False, unique=True)
     email = Column(String)  # Add email field
-    preferred_payment_method = Column(String)
-    dietary_preferences = Column(String)  # e.g., "vegetarian", "no-pork", etc.
     last_order_date = Column(DateTime)
     total_orders = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -148,8 +146,6 @@ class Database:
             "name": "VARCHAR",
             "phone": "VARCHAR",
             "email": "VARCHAR",  # Add email field
-            "preferred_payment_method": "VARCHAR",
-            "dietary_preferences": "VARCHAR",
             "last_order_date": "TIMESTAMP",
             "total_orders": "INTEGER",
             "created_at": "TIMESTAMP",
@@ -252,98 +248,60 @@ class Database:
         return query.filter(AddOn.is_available == 1).all()
 
     def find_similar_menu_item(self, item_name, category=None):
-        if not item_name:
-            return None
-
-        item_name_lower = item_name.lower()
+        """Find a menu item with a similar name."""
         query = self.session.query(MenuItem)
-
         if category:
             query = query.filter(MenuItem.category == category)
+        items = query.filter(MenuItem.is_available == 1).all()
 
-        # Try exact match first
-        exact_match = query.filter(MenuItem.name.ilike(item_name_lower)).first()
-        if exact_match:
-            return exact_match
-
-        # Try contains match
-        for item in query.all():
-            if (
-                item_name_lower in item.name.lower()
-                or item.name.lower() in item_name_lower
-            ):
+        # Simple string matching for now
+        item_name = item_name.lower()
+        for item in items:
+            if item_name in item.name.lower():
                 return item
-
         return None
 
     def create_customer(self, name, phone, auto_commit=False, **kwargs):
+        """Create a new customer."""
         try:
-            customer = Customer(
-                name=name,
-                phone=str(phone),  # Ensure phone is stored as string
-                **kwargs,
-            )
+            customer = Customer(name=name, phone=phone, **kwargs)
             self.session.add(customer)
-            self.session.flush()  # Get ID without committing yet
-
-            # Auto-commit if requested
             if auto_commit:
-                if not self.safe_commit():
-                    print("Failed to commit customer creation after multiple retries")
-                    raise Exception("Failed to commit customer creation")
-
+                self.session.commit()
             return customer
         except Exception as e:
-            import traceback
-
-            print(f"Error creating customer: {e}")
-            print(f"Traceback: {traceback.format_exc()}")
             self.session.rollback()
-            raise
+            raise Exception(f"Error creating customer: {e}")
 
     def get_customer_by_phone(self, phone):
-        # Search by phone as string
-        return self.session.query(Customer).filter(Customer.phone == str(phone)).first()
+        """Get a customer by phone number."""
+        return self.session.query(Customer).filter(Customer.phone == phone).first()
 
     def update_customer(self, phone, auto_commit=False, **kwargs):
-        # Find customer by phone (as string)
-        customer = self.get_customer_by_phone(str(phone))
-        if not customer:
-            return None
-
+        """Update customer information."""
         try:
-            # If phone is being updated, ensure it's stored as string
-            if "phone" in kwargs:
-                kwargs["phone"] = str(kwargs["phone"])
+            customer = self.get_customer_by_phone(phone)
+            if not customer:
+                raise Exception("Customer not found")
 
+            # Update fields
             for key, value in kwargs.items():
-                setattr(customer, key, value)
+                if hasattr(customer, key):
+                    setattr(customer, key, value)
 
-            self.session.flush()  # Flush changes without committing yet
-
-            # Auto-commit if requested
             if auto_commit:
-                if not self.safe_commit():
-                    print("Failed to commit customer update after multiple retries")
-                    raise Exception("Failed to commit customer update")
-
+                self.session.commit()
             return customer
         except Exception as e:
-            import traceback
-
-            print(f"Error updating customer: {e}")
-            print(f"Traceback: {traceback.format_exc()}")
             self.session.rollback()
-            raise
+            raise Exception(f"Error updating customer: {e}")
 
     def get_customer_order_history(self, phone):
-        # Find orders by phone (as string)
-        return (
-            self.session.query(Order)
-            .filter(Order.customer_phone == str(phone))
-            .order_by(Order.created_at.desc())
-            .all()
-        )
+        """Get order history for a customer."""
+        customer = self.get_customer_by_phone(phone)
+        if not customer:
+            return []
+        return self.session.query(Order).filter(Order.customer_id == customer.id).all()
 
     def create_order(
         self,
@@ -355,113 +313,69 @@ class Database:
         special_instructions=None,
         auto_commit=False,
     ):
+        """Create a new order."""
         try:
-            # Store customer_phone as string
-            customer_phone_str = str(customer_phone)
-            print(f"Creating order for: {customer_name}, phone: {customer_phone_str}")
-
-            # Check if customer exists
-            customer = self.get_customer_by_phone(customer_phone_str)
+            # Get or create customer
+            customer = self.get_customer_by_phone(customer_phone)
             if not customer:
-                print(f"Customer not found, creating new customer: {customer_name}")
-                # Create a new customer with minimal information
-                try:
-                    customer = Customer(
-                        name=customer_name,
-                        phone=customer_phone_str,
-                    )
-                    self.session.add(customer)
-                    self.session.flush()  # Get ID without committing yet
-                    print(f"New customer created with ID: {customer.id}")
-                except Exception as e:
-                    print(f"Error creating customer: {e}")
-                    self.session.rollback()
-                    raise
-
-            # Update customer's last order date and total orders
-            print(f"Updating customer data for ID: {customer.id}")
-            customer.last_order_date = datetime.utcnow()
-            customer.total_orders += 1
+                customer = self.create_customer(
+                    name=customer_name, phone=customer_phone, auto_commit=True
+                )
 
             # Calculate estimated preparation time
-            estimated_preparation_time = self._calculate_preparation_time(order_items)
-            print(f"Estimated preparation time: {estimated_preparation_time} minutes")
+            estimated_time = self._calculate_preparation_time(order_items)
 
-            # Create the order
-            print(
-                f"Creating order with: {len(order_items)} items, total: ${total_amount}"
-            )
-
-            # Ensure order_items is properly serialized as JSON
-            order_items_json = order_items
-            if not isinstance(order_items, str):
-                try:
-                    # Check if we can serialize and deserialize it
-                    order_items_json = json.dumps(order_items)
-                    json.loads(order_items_json)
-                    print(
-                        f"Successfully serialized order_items: {order_items_json[:100]}"
-                    )
-                except Exception as e:
-                    print(f"Error serializing order_items: {e}")
-                    print(f"Original order_items: {order_items}")
-                    raise
-
+            # Create order
             order = Order(
                 customer_id=customer.id,
                 customer_name=customer_name,
-                customer_phone=customer_phone_str,
-                order_items=order_items,  # SQLAlchemy should handle JSON serialization
+                customer_phone=customer_phone,
+                order_items=order_items,
                 total_amount=total_amount,
                 payment_method=payment_method,
                 special_instructions=special_instructions,
-                estimated_preparation_time=estimated_preparation_time,
+                estimated_preparation_time=estimated_time,
             )
+
+            # Update customer information
+            customer.last_order_date = datetime.utcnow()
+            customer.total_orders += 1
+
             self.session.add(order)
-
-            # Flush to get the ID but don't commit yet
-            self.session.flush()
-            print(f"Order prepared with ID: {order.id}")
-
-            # Auto-commit if requested
             if auto_commit:
-                if not self.safe_commit():
-                    print("Failed to commit order creation after multiple retries")
-                    raise Exception("Failed to commit order creation")
+                self.session.commit()
 
             return order
         except Exception as e:
-            import traceback
-
-            print(f"Unexpected error in create_order: {e}")
-            print(f"Traceback: {traceback.format_exc()}")
             self.session.rollback()
-            raise
+            raise Exception(f"Error creating order: {e}")
 
     def _calculate_preparation_time(self, order_items):
+        """Calculate estimated preparation time based on order items."""
         # Simple implementation - can be made more sophisticated
-        base_time = 20  # Base preparation time in minutes
-        items_count = len(order_items)
-        return base_time + (items_count * 5)  # 5 minutes per additional item
+        return len(order_items) * 5  # 5 minutes per item
 
     def get_order_status(self, order_id):
-        return self.session.query(Order).filter(Order.id == order_id).first()
+        """Get the status of an order."""
+        order = self.session.query(Order).get(order_id)
+        return order.status if order else None
 
     def update_order_status(self, order_id, status, estimated_preparation_time=None):
-        order = self.session.query(Order).filter(Order.id == order_id).first()
-        if order:
-            order.status = status
+        """Update the status of an order."""
+        try:
+            order = self.session.query(Order).get(order_id)
+            if not order:
+                raise Exception("Order not found")
 
-            # Update estimated preparation time if provided
+            order.status = status
             if estimated_preparation_time is not None:
-                print(
-                    f"Updating order {order_id} estimated_preparation_time to {estimated_preparation_time}"
-                )
                 order.estimated_preparation_time = estimated_preparation_time
 
             self.session.commit()
             return order
-        return None
+        except Exception as e:
+            self.session.rollback()
+            raise Exception(f"Error updating order status: {e}")
 
     def safe_commit(self):
         """Safely commit changes to the database."""
@@ -469,43 +383,29 @@ class Database:
             self.session.commit()
             return True
         except Exception as e:
-            print(f"Error committing changes: {e}")
             self.session.rollback()
+            print(f"Error committing changes: {e}")
             return False
 
     def begin_transaction(self):
         """Begin a new transaction."""
-        # SQLAlchemy automatically starts a transaction when needed,
-        # but this method is provided for clarity
-        pass
+        try:
+            self.session.begin()
+        except Exception as e:
+            print(f"Error beginning transaction: {e}")
+            raise
 
     def commit(self):
         """Commit the current transaction."""
-        return self.safe_commit()
+        self.session.commit()
 
     def rollback(self):
-        """Roll back the current transaction."""
-        try:
-            self.session.rollback()
-            return True
-        except Exception as e:
-            print(f"Error rolling back transaction: {e}")
-            return False
+        """Rollback the current transaction."""
+        self.session.rollback()
 
     def _ensure_user_table(self):
-        """Ensure the User table exists and has the correct schema."""
+        """Ensure the User table exists."""
         inspector = inspect(self.engine)
-        user_table_exists = "users" in inspector.get_table_names()
-
-        if not user_table_exists:
-            print("Creating users table...")
+        if "users" not in inspector.get_table_names():
             UserBase.metadata.create_all(self.engine)
-
-            # Verify table was created
-            inspector = inspect(self.engine)
-            if "users" in inspector.get_table_names():
-                print("Users table created successfully")
-            else:
-                print("WARNING: Failed to create users table")
-        else:
-            print("Users table already exists")
+            print("Created users table.")

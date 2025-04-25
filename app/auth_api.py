@@ -3,8 +3,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
-from app.user_model import UserManager, User
-from app.database import Database
+from app.db_operations import UserManager, User, Database
 import os
 from fastapi import Header
 
