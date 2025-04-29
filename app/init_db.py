@@ -16,9 +16,9 @@ def init_database():
         print("Users table already exists.")
 
     # Clear existing data
-    db.session.query(MenuItem).delete()
-    db.session.query(AddOn).delete()
-    db.session.query(Customer).delete()
+    # db.session.query(MenuItem).delete()
+    # db.session.query(AddOn).delete()
+    # db.session.query(Customer).delete()
 
     # Add menu items
     menu_items = [
@@ -196,48 +196,48 @@ def init_database():
     ]
 
     # Add sample customers
-    customers = [
-        Customer(
-            name="John Smith",
-            phone="5551234567",
-            email="john.smith@example.com",
-            preferred_payment_method="credit card",
-            dietary_preferences="no preferences",
-            total_orders=5,
-        ),
-        Customer(
-            name="Emily Johnson",
-            phone="5559876543",
-            email="emily.j@example.com",
-            preferred_payment_method="cash",
-            dietary_preferences="vegetarian",
-            total_orders=3,
-        ),
-        Customer(
-            name="Michael Brown",
-            phone="5552223333",
-            email="mbrown@example.com",
-            preferred_payment_method="digital payment",
-            dietary_preferences="gluten-free",
-            total_orders=7,
-        ),
-        Customer(
-            name="Sarah Williams",
-            phone="5554445555",
-            email="sarahw@example.com",
-            preferred_payment_method="credit card",
-            dietary_preferences="dairy-free",
-            total_orders=2,
-        ),
-        Customer(
-            name="David Miller",
-            phone="5556667777",
-            email="dmiller@example.com",
-            preferred_payment_method="cash",
-            dietary_preferences="no preferences",
-            total_orders=0,
-        ),
-    ]
+    # customers = [
+    #     Customer(
+    #         name="John Smith",
+    #         phone="5551234567",
+    #         email="john.smith@example.com",
+    #         preferred_payment_method="credit card",
+    #         dietary_preferences="no preferences",
+    #         total_orders=5,
+    #     ),
+    #     Customer(
+    #         name="Emily Johnson",
+    #         phone="5559876543",
+    #         email="emily.j@example.com",
+    #         preferred_payment_method="cash",
+    #         dietary_preferences="vegetarian",
+    #         total_orders=3,
+    #     ),
+    #     Customer(
+    #         name="Michael Brown",
+    #         phone="5552223333",
+    #         email="mbrown@example.com",
+    #         preferred_payment_method="digital payment",
+    #         dietary_preferences="gluten-free",
+    #         total_orders=7,
+    #     ),
+    #     Customer(
+    #         name="Sarah Williams",
+    #         phone="5554445555",
+    #         email="sarahw@example.com",
+    #         preferred_payment_method="credit card",
+    #         dietary_preferences="dairy-free",
+    #         total_orders=2,
+    #     ),
+    #     Customer(
+    #         name="David Miller",
+    #         phone="5556667777",
+    #         email="dmiller@example.com",
+    #         preferred_payment_method="cash",
+    #         dietary_preferences="no preferences",
+    #         total_orders=0,
+    #     ),
+    # ]
 
     # Add restaurant data (will only be added if no restaurant exists)
     restaurant = Restaurant(
@@ -256,8 +256,8 @@ def init_database():
     for addon in add_ons:
         db.session.add(addon)
 
-    for customer in customers:
-        db.session.add(customer)
+    # for customer in customers:
+    #     db.session.add(customer)
 
     # Clear existing restaurants and add new one
     db.session.query(Restaurant).delete()

@@ -1,0 +1,35 @@
+{
+  "apps": [
+    {
+      "name": "agent_wh",
+      "script": ".venv/bin/python -m uvicorn app.server:app --host 0.0.0.0 --port $AGENT_PORT",
+      "interpreter": "none",
+      "cwd": ".",
+      "exec_mode": "fork",
+      "env": {
+        "AGENT_PORT": "8000"
+      },
+      "autorestart": true,
+      "restart_delay": 2000
+    },
+    {
+      "name": "twilio_wh",
+      "script": "twilio_webhook.js",
+      "interpreter": "node",
+      "cwd": ".",
+      "exec_mode": "fork",
+      "autorestart": true,
+      "restart_delay": 2000
+    },
+    {
+      "name": "frontend",
+      "cwd": "frontend",
+      "script": "npm",
+      "args": "run start",
+      "interpreter": "none",
+      "exec_mode": "fork",
+      "autorestart": true,
+      "restart_delay": 2000
+    }
+  ]
+}

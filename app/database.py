@@ -104,7 +104,7 @@ class Database:
         try:
             # Construct database URL from individual environment variables
             db_user = os.getenv("DATABASE_USER", "postgres")
-            db_password = os.getenv("DATABASE_PASSWORD", "postgres")
+            db_password = os.getenv("DATABASE_PASSWORD", "Tote**2025")
             db_host = os.getenv("DATABASE_HOST", "localhost")
             db_port = os.getenv("DATABASE_PORT", "5432")
             db_name = os.getenv("DATABASE_NAME", "tote")
@@ -113,7 +113,6 @@ class Database:
             database_url = (
                 f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
             )
-            print(f"Using database URL: {database_url}")
 
             self.engine = create_engine(database_url)
 

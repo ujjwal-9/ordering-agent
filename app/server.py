@@ -36,9 +36,9 @@ db = Database()
 print("Database initialized and tables created")
 
 # List of allowed ports for frontend dev
-ports = [3000, 3001, 3002, 3003]
-allow_origins = [f"http://localhost:{port}" for port in ports] + [
-    f"http://127.0.0.1:{port}" for port in ports
+ports = [3000]
+allow_origins = [f"http://0.0.0.0:{port}" for port in ports] + [
+    f"http://34.44.106.200:{port}" for port in ports
 ]
 
 # Configure CORS middleware for the frontend

@@ -196,7 +196,7 @@ class UserManager:
 if __name__ == "__main__":
     database_url = os.getenv(
         "DATABASE_URL",
-        "postgresql://postgres:postgres@localhost:5432/tote",
+        "postgresql://postgres:Tote**2025@localhost:5432/tote",
     )
     engine = create_engine(database_url)
 
@@ -218,8 +218,8 @@ if __name__ == "__main__":
         try:
             admin_user = user_manager.register_user(
                 username="admin",
-                email="admin@example.com",
-                password="admin123",  # This should be a secure password in production
+                email="ujjwalupadhyay8@gmail.com",
+                password="test@1234",  # This should be a secure password in production
             )
             admin_user.is_admin = True
             session.commit()
