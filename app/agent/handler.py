@@ -457,6 +457,9 @@ class ToolHandler:
         prompt.append(
             {"role": "tool", "tool_call_id": tool_call["id"], "content": str(result)}
         )
+        print("********************* SPECS PROMPT *********************")
+        print(prompt)
+        print("*************************************************")
         return prompt
 
     async def process_function_call(
@@ -614,9 +617,39 @@ class ToolHandler:
         elif func_name == "fetch_menu_categories":
             result = self.fetch_menu_categories()
             if result["success"]:
-                response_text = "Here are our menu categories:\n\n"
-                for category in result["categories"]:
-                    response_text += f"- {category.title()}\n"
+                prompt = [
+                    {
+                        "role": "system",
+                        "content": f"""
+## Style Guardrails
+- [Be friendly and enthusiastic] Show excitement about our menu items and make recommendations
+- [Be conversational] Use natural language and engage in friendly dialogue, Dont use any special characters or markdown
+- [Be helpful] Guide customers through the ordering process with suggestions and explanations]
+- [Be concise] Dont use long sentences, use short and concise sentences, but still keep it engaging and friendly
+
+## Conversation History
+{self.memory.get_conversation_history()}
+
+## Instructions
+You are given a list of categories and you have to present them in a way that is easy to understand for a customer.
+
+## Here is the list of categories:
+{result["categories"]}
+                """,
+                    }
+                ]
+                print("********************* CATEGORIES PROMPT *********************")
+                print(prompt)
+                print("*************************************************")
+                response = await self.client.chat.completions.create(
+                    model=os.environ.get("OPENAI_MODEL"),
+                    messages=prompt,
+                    temperature=0.2,
+                )
+                response_text = response.choices[0].message.content
+                print("********************* CATEGORIES *********************")
+                print(response_text)
+                print("*************************************************")
                 RUN_CLIENT["run"] = True
             else:
                 response_text = "I'm having trouble accessing our menu categories right now. Please try again in a moment."
@@ -629,14 +662,33 @@ class ToolHandler:
                 menu_items = result["items"]
 
                 if menu_items:
-                    response_text = (
-                        f"Here are the items in our {category_name} category:\n\n"
+                    prompt = [
+                        {
+                            "role": "system",
+                            "content": f"""
+## Style Guardrails
+- [Be friendly and enthusiastic] Show excitement about our menu items and make recommendations
+- [Be conversational] Use natural language and engage in friendly dialogue, Dont use any special characters or markdown
+- [Be helpful] Guide customers through the ordering process with suggestions and explanations]
+- [Be concise] Dont use long sentences, use short and concise sentences, but still keep it engaging and friendly
+
+## Conversation History
+{self.memory.get_conversation_history()}
+
+## Instructions
+You are given a list of menu items and you have to present them in a way that is easy to understand for a customer.
+
+## Here is the list of menu items:
+{menu_items}
+                    """,
+                        }
+                    ]
+                    response = await self.client.chat.completions.create(
+                        model=os.environ.get("OPENAI_MODEL"),
+                        messages=prompt,
+                        temperature=0.2,
                     )
-                    for item in menu_items:
-                        price = f"${item['base_price']:.2f}"
-                        response_text += f"- {item['name']} ({price})\n"
-                        if item["description"]:
-                            response_text += f"  {item['description']}\n"
+                    response_text = response.choices[0].message.content
                 else:
                     response_text = f"I don't see any items available in the {category_name} category right now."
 
@@ -663,7 +715,33 @@ class ToolHandler:
         elif func_name == "fetch_addons":
             result = self.fetch_addons(arguments)
             if result["success"]:
-                response_text = format_addon_response(result)
+                prompt = [
+                    {
+                        "role": "system",
+                        "content": f"""
+## Style Guardrails
+- [Be friendly and enthusiastic] Show excitement about our menu items and make recommendations
+- [Be conversational] Use natural language and engage in friendly dialogue, Dont use any special characters or markdown
+- [Be helpful] Guide customers through the ordering process with suggestions and explanations]
+- [Be concise] Dont use long sentences, use short and concise sentences, but still keep it engaging and friendly
+
+## Conversation History
+{self.memory.get_conversation_history()}
+
+## Instructions
+You are given a list of add-ons and you have to present them one by one to the customer. You can use the conversation history to make recommendations and suggestions.
+
+## Here is the list of add-ons:
+{result["add_ons"]}
+                    """,
+                    }
+                ]
+                response = await self.client.chat.completions.create(
+                    model=os.environ.get("OPENAI_MODEL"),
+                    messages=prompt,
+                    temperature=0.2,
+                )
+                response_text = response.choices[0].message.content
                 RUN_CLIENT["run"] = True
             else:
                 response_text = "I'm having trouble getting the add-on options. Would you like to try something else?"
@@ -698,36 +776,44 @@ class ToolHandler:
                 "I'm not sure how to handle that request. Can you try something else?"
             )
 
-        if os.environ.get("RUN_TOOLS") == "True":
-            prompt = self.specs_create_prompt(
-                tool_call=tool_call,
-                result=response_text,
-            )
-        else:
-            if RUN_CLIENT["run"]:
-                prompt = self.create_prompt(
-                    tool_call=tool_call,
-                    result=response_text,
-                    agent_prompt=TOOL_PROMPT[func_name],
-                )
-            else:
-                pass
+        # if os.environ.get("RUN_TOOLS") == "True":
+        #     prompt = self.specs_create_prompt(
+        #         tool_call=tool_call,
+        #         result=response_text,
+        #     )
+        # else:
+        #     if RUN_CLIENT["run"]:
+        #         prompt = self.create_prompt(
+        #             tool_call=tool_call,
+        #             result=response_text,
+        #             agent_prompt=TOOL_PROMPT[func_name],
+        #         )
+        #     else:
+        #         pass
 
-        if not RUN_CLIENT["run"]:
-            print("********************* AFTER TOOL SELECTION *********************")
-            print(prompt)
-            print("***************************************************************")
-            response = await self.client.chat.completions.create(
-                model=os.environ.get("OPENAI_MODEL"), messages=prompt, temperature=0.2
-            )
-            response_text = response.choices[0].message.content
+        # if not RUN_CLIENT["run"]:
+        #     print("********************* AFTER TOOL SELECTION *********************")
+        #     print(prompt)
+        #     print("***************************************************************")
+        #     response = await self.client.chat.completions.create(
+        #         model=os.environ.get("OPENAI_MODEL"), messages=prompt, temperature=0.2
+        #     )
+        #     response_text = response.choices[0].message.content
 
-        if os.environ.get("RUN_TOOLS") == "True":
-            self.memory.add_message(role="assistant", content=response_text)
-        else:
-            self.memory.add_message(
-                role="tool", content=response_text, tool_call_id=tool_call["id"]
-            )
+        # if os.environ.get("RUN_TOOLS") == "True":
+        #     response = await self.client.chat.completions.create(
+        #         model=os.environ.get("OPENAI_MODEL"), messages=prompt, temperature=0.2
+        #     )
+        #     response_text = response.choices[0].message.content
+        #     self.memory.add_message(role="assistant", content=response_text)
+        # else:
+        #     self.memory.add_message(
+        #         role="tool", content=response_text, tool_call_id=tool_call["id"]
+        #     )
+
+        self.memory.add_message(
+            role="tool", content=response_text, tool_call_id=tool_call["id"]
+        )
 
         yield ResponseResponse(
             response_id=response_id,

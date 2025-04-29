@@ -64,7 +64,7 @@ def prepare_tools():
             "type": "function",
             "function": {
                 "name": "verify_order_item",
-                "description": "Verify if a order item exists and find similar items if it doesn't.",
+                "description": "Verify if a order item exists and find similar items if it doesn't. It is used when customer has selected a menu item to order.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -90,7 +90,7 @@ def prepare_tools():
             "type": "function",
             "function": {
                 "name": "create_order",
-                "description": "Create a new order in the database.",
+                "description": "When the customer confirms the order is complete, use this function to create the order in the database.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -146,7 +146,7 @@ def prepare_tools():
             "type": "function",
             "function": {
                 "name": "fetch_items_for_category",
-                "description": "Fetch all available menu items for a specific category. It is used when customer has chosen a category to read through.",
+                "description": "Fetch available menu items for a specific category. It is used when customer has chosen a category to read through.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -180,16 +180,16 @@ def prepare_tools():
             "type": "function",
             "function": {
                 "name": "fetch_addons",
-                "description": "Get available add-ons for a specific menu item.",
+                "description": "Get available add-ons for a specific menu item. It is used when customer has chosen a menu item to order.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "item_name": {
+                        "category": {
                             "type": "string",
-                            "description": "The name of the menu item",
+                            "description": "The category of the add-ons to fetch",
                         },
                     },
-                    "required": ["item_name"],
+                    "required": ["category"],
                 },
             },
         },
