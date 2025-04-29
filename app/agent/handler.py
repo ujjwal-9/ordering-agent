@@ -572,7 +572,9 @@ class ToolHandler:
                 response_text = f"Thank you, {name}! I've registered you as a new customer. What would you like to order today?"
             else:
                 if "customer" in result:
-                    response_text = f"I see you're already registered in our system as {result['customer']['name']}. What would you like to order today?"
+                    response_text = (
+                        f"Thank you, {name}! What would you like to order today?"
+                    )
                 else:
                     # Error creating customer
                     response_text = "I'm having trouble registering your information. Could you please try again with your name and phone number?"
@@ -715,6 +717,36 @@ You are given a list of menu items and you have to present them in a way that is
         elif func_name == "fetch_addons":
             result = self.fetch_addons(arguments)
             if result["success"]:
+                # Check if we're in the middle of add-on selection
+                current_addon_type = None
+                for msg in reversed(self.memory.get_conversation_history()):
+                    if msg["role"] == "assistant" and "size" in msg["content"].lower():
+                        current_addon_type = "size"
+                        break
+                    elif (
+                        msg["role"] == "assistant" and "sauce" in msg["content"].lower()
+                    ):
+                        current_addon_type = "sauce"
+                        break
+                    elif (
+                        msg["role"] == "assistant"
+                        and "topping" in msg["content"].lower()
+                    ):
+                        current_addon_type = "topping"
+                        break
+                    elif msg["role"] == "user" and any(
+                        word in msg["content"].lower()
+                        for word in ["small", "medium", "large"]
+                    ):
+                        current_addon_type = "sauce"
+                        break
+                    elif msg["role"] == "user" and any(
+                        word in msg["content"].lower()
+                        for word in ["tomato", "white", "spicy"]
+                    ):
+                        current_addon_type = "topping"
+                        break
+
                 prompt = [
                     {
                         "role": "system",
@@ -722,14 +754,31 @@ You are given a list of menu items and you have to present them in a way that is
 ## Style Guardrails
 - [Be friendly and enthusiastic] Show excitement about our menu items and make recommendations
 - [Be conversational] Use natural language and engage in friendly dialogue, Dont use any special characters or markdown
-- [Be helpful] Guide customers through the ordering process with suggestions and explanations]
+- [Be helpful] Guide customers through the ordering process with suggestions and explanations
 - [Be concise] Dont use long sentences, use short and concise sentences, but still keep it engaging and friendly
+- [Be sequential] Present add-ons one category at a time and wait for user response before moving to the next category
+- [Be context-aware] Use the conversation history to determine which add-on category to present next
 
 ## Conversation History
 {self.memory.get_conversation_history()}
 
+## Current Add-on Context
+Current add-on type being presented: {current_addon_type or "starting add-on selection"}
+
 ## Instructions
-You are given a list of add-ons and you have to present them one by one to the customer. You can use the conversation history to make recommendations and suggestions.
+You are given a list of add-ons organized by type (size, sauce, topping, other). You must present them one category at a time in a conversational manner:
+
+1. If no current_addon_type is set, start with size options
+2. If current_addon_type is "size" and user has responded, move to sauce options
+3. If current_addon_type is "sauce" and user has responded, move to topping options
+4. If current_addon_type is "topping" and user has responded, present any other add-ons if available
+
+For each category:
+- Present options in a friendly, conversational way
+- Mention prices naturally within the conversation
+- Make recommendations if appropriate
+- Wait for user response before moving to next category
+- Acknowledge the user's previous selection when moving to the next category
 
 ## Here is the list of add-ons:
 {result["add_ons"]}
