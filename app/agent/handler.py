@@ -217,6 +217,7 @@ class ToolHandler:
             )
             response["similar_items"] = similar_items
         else:
+            # Exact menu item found
             response["exists"] = True
             response["menu_item"] = {
                 "id": menu_item.id,
@@ -228,19 +229,43 @@ class ToolHandler:
             }
             response["available"] = getattr(menu_item, "is_available", 1) == 1
 
-            # Get add-ons by category
-            available_add_ons = self.db.get_add_ons(menu_item.category)
+            # Fetch all available add-ons for this category
+            all_addons = self.db.get_add_ons(menu_item.category)
+            # Organize available add-ons by type
+            addons_by_type: Dict[str, list] = {}
+            for a in all_addons:
+                atype = a.type or "other"
+                addons_by_type.setdefault(atype, []).append({
+                    "id": a.id,
+                    "name": a.name,
+                    "price": a.price,
+                })
 
-            for addon in add_ons:
-                if addon in available_add_ons:
-                    response["add_ons"].append(
-                        {
-                            "id": addon.id,
-                            "name": addon.name,
-                            "price": addon.price,
-                            "type": addon.type,
-                        }
-                    )
+            # Identify which add-on types the user already selected
+            selected_types = set()
+            selected_addons = []
+            for name in add_ons:
+                for a in all_addons:
+                    if name.lower() == a.name.lower():
+                        atype = a.type or "other"
+                        selected_types.add(atype)
+                        selected_addons.append({
+                            "id": a.id,
+                            "name": a.name,
+                            "price": a.price,
+                            "type": atype,
+                        })
+                        break
+
+            # Determine remaining add-on types to prompt (in preferred order)
+            type_order = ["size", "sauce", "topping", "other"]
+            remaining = [t for t in type_order if t in addons_by_type and t not in selected_types]
+
+            # Build response with selected and remaining add-ons info
+            response["add_ons_selected"] = selected_addons
+            response["selected_add_on_types"] = list(selected_types)
+            response["available_add_ons_by_type"] = addons_by_type
+            response["remaining_add_on_types"] = remaining
         return response
 
     def fetch_menu_categories(self, params: Dict[str, Any] = None) -> Dict[str, Any]:
@@ -592,28 +617,76 @@ class ToolHandler:
         # Handle create_order function
         elif func_name == "create_order":
             try:
-                customer_phone = self.memory.customer_info["phone"]
-                order_data = {
-                    "customer_name": arguments["customer_name"],
-                    "customer_phone": customer_phone,
-                    "order_items": arguments["order_items"],
-                    "total_amount": calculate_total_amount(
-                        arguments["order_items"], self.db
-                    ),
-                }
-
-                if "special_instructions" in arguments:
-                    order_data["special_instructions"] = arguments[
-                        "special_instructions"
-                    ]
-
-                order = self.db.create_order(**order_data, auto_commit=True)
-                restaurant = self.db.get_restaurant()
-                pickup_address = restaurant.address if restaurant else "our restaurant"
-                response_text = f"Great! I've placed your order. Your order number is #{order.id}. We will send you a confirmation text shortly along with order details and estimated pickup time. You can pick up your order at {pickup_address}."
+                customer_phone = self.memory.customer_info.get("phone")
+                # Sanitize and split order items
+                raw_items = arguments.get("order_items", []) or []
+                sanitized_items = []
+                for item in raw_items:
+                    name = item.get("item_name")
+                    if not name:
+                        continue
+                    quantity = item.get("quantity") or 1
+                    addons = item.get("add_ons") or []
+                    # If add-ons is a list of lists, treat each sub-list as a separate item
+                    if any(isinstance(a, list) for a in addons):
+                        for a in addons:
+                            if isinstance(a, list):
+                                sanitized_items.append({
+                                    "item_name": name,
+                                    "quantity": 1,
+                                    "add_ons": a,
+                                })
+                            else:
+                                sanitized_items.append({
+                                    "item_name": name,
+                                    "quantity": 1,
+                                    "add_ons": [a],
+                                })
+                    # If quantity >1 and number of add-ons equals quantity, split into individual items
+                    elif quantity > 1 and isinstance(addons, list) and len(addons) == quantity and all(isinstance(a, str) for a in addons):
+                        for a in addons:
+                            sanitized_items.append({
+                                "item_name": name,
+                                "quantity": 1,
+                                "add_ons": [a],
+                            })
+                    else:
+                        sanitized_items.append({
+                            "item_name": name,
+                            "quantity": quantity,
+                            "add_ons": addons,
+                        })
+                # If no valid items, ask to retry
+                if not sanitized_items:
+                    response_text = (
+                        "I didn't find any valid items to order. Could you please list your items again?"
+                    )
+                else:
+                    total_amt = calculate_total_amount(sanitized_items, self.db)
+                    order_data = {
+                        "customer_name": arguments.get("customer_name", ""),
+                        "customer_phone": customer_phone,
+                        "order_items": sanitized_items,
+                        "total_amount": total_amt,
+                    }
+                    if arguments.get("special_instructions"):
+                        order_data["special_instructions"] = arguments.get(
+                            "special_instructions"
+                        )
+                    order = self.db.create_order(**order_data, auto_commit=True)
+                    restaurant = self.db.get_restaurant()
+                    pickup_address = restaurant.address if restaurant else "our restaurant"
+                    response_text = (
+                        f"Great! I've placed your order. Your order number is #{order.id}. "
+                        f"We will send you a confirmation text shortly along with order details and estimated pickup time. "
+                        f"You can pick up your order at {pickup_address}."
+                    )
             except Exception as e:
                 logger.error(f"Error creating order: {str(e)}")
-                response_text = "I'm sorry, there was an error processing your order. Please try again or contact customer support."
+                response_text = (
+                    "I'm sorry, there was an error processing your order. "
+                    "Please try again or contact customer support."
+                )
 
         # Handle fetch_menu_categories function
         elif func_name == "fetch_menu_categories":
@@ -716,85 +789,49 @@ You are given a list of menu items and you have to present them in a way that is
         # Handle fetch_addons function
         elif func_name == "fetch_addons":
             result = self.fetch_addons(arguments)
-            if result["success"]:
-                # Check if we're in the middle of add-on selection
-                current_addon_type = None
-                for msg in reversed(self.memory.get_conversation_history()):
-                    if msg["role"] == "assistant" and "size" in msg["content"].lower():
-                        current_addon_type = "size"
-                        break
-                    elif (
-                        msg["role"] == "assistant" and "sauce" in msg["content"].lower()
-                    ):
-                        current_addon_type = "sauce"
-                        break
-                    elif (
-                        msg["role"] == "assistant"
-                        and "topping" in msg["content"].lower()
-                    ):
-                        current_addon_type = "topping"
-                        break
-                    elif msg["role"] == "user" and any(
-                        word in msg["content"].lower()
-                        for word in ["small", "medium", "large"]
-                    ):
-                        current_addon_type = "sauce"
-                        break
-                    elif msg["role"] == "user" and any(
-                        word in msg["content"].lower()
-                        for word in ["tomato", "white", "spicy"]
-                    ):
-                        current_addon_type = "topping"
-                        break
-
-                prompt = [
-                    {
-                        "role": "system",
-                        "content": f"""
-## Style Guardrails
-- [Be friendly and enthusiastic] Show excitement about our menu items and make recommendations
-- [Be conversational] Use natural language and engage in friendly dialogue, Dont use any special characters or markdown
-- [Be helpful] Guide customers through the ordering process with suggestions and explanations
-- [Be concise] Dont use long sentences, use short and concise sentences, but still keep it engaging and friendly
-- [Be sequential] Present add-ons one category at a time and wait for user response before moving to the next category
-- [Be context-aware] Use the conversation history to determine which add-on category to present next
-
-## Conversation History
-{self.memory.get_conversation_history()}
-
-## Current Add-on Context
-Current add-on type being presented: {current_addon_type or "starting add-on selection"}
-
-## Instructions
-You are given a list of add-ons organized by type (size, sauce, topping, other). You must present them one category at a time in a conversational manner:
-
-1. If no current_addon_type is set, start with size options
-2. If current_addon_type is "size" and user has responded, move to sauce options
-3. If current_addon_type is "sauce" and user has responded, move to topping options
-4. If current_addon_type is "topping" and user has responded, present any other add-ons if available
-
-For each category:
-- Present options in a friendly, conversational way
-- Mention prices naturally within the conversation
-- Make recommendations if appropriate
-- Wait for user response before moving to next category
-- Acknowledge the user's previous selection when moving to the next category
-
-## Here is the list of add-ons:
-{result["add_ons"]}
-                    """,
-                    }
-                ]
-                response = await self.client.chat.completions.create(
-                    model=os.environ.get("OPENAI_MODEL"),
-                    messages=prompt,
-                    temperature=0.2,
-                )
-                response_text = response.choices[0].message.content
-                RUN_CLIENT["run"] = True
+            if result.get("success"):
+                # Initialize sequential add-on flow
+                if self.memory:
+                    self.memory.init_addon_flow(result.get("add_ons", {}))
+                # Present the first add-on category
+                addon_type = self.memory.get_current_addon_type() if self.memory else None
+                options = result.get("add_ons", {}).get(addon_type, []) if addon_type else []
+                lines = []
+                if addon_type:
+                    lines.append(f"Great! Let's add some {addon_type}s to your order:")
+                    for addon in options:
+                        price_text = f"${addon['price']:.2f}" if addon['price'] > 0 else "no extra charge"
+                        lines.append(f"- {addon['name']} ({price_text})")
+                    lines.append(f"Which {addon_type} would you like?")
+                    response_text = "\n".join(lines)
+                else:
+                    response_text = "There are no add-ons available for this item."
             else:
                 response_text = "I'm having trouble getting the add-on options. Would you like to try something else?"
 
+        # Handle recording of add-on selections
+        elif func_name == "record_addons":
+            addon_type = arguments.get("addon_type")
+            selection = arguments.get("selection")
+            # Record the customer's selection and advance the flow
+            if self.memory:
+                self.memory.record_addon_selection(addon_type, selection)
+                self.memory.advance_addon_flow()
+            # Determine next add-on or summarize selections
+            if self.memory and not self.memory.is_addon_flow_complete():
+                next_type = self.memory.get_current_addon_type()
+                options = self.memory.addon_flow.get("options", {}).get(next_type, [])
+                lines = [f"Great choice! Now for {next_type}s:"]
+                for addon in options:
+                    price_text = f"${addon['price']:.2f}" if addon['price'] > 0 else "no extra charge"
+                    lines.append(f"- {addon['name']} ({price_text})")
+                lines.append(f"Which {next_type} would you like?")
+                response_text = "\n".join(lines)
+            else:
+                selections = self.memory.get_addon_selections() if self.memory else {}
+                parts = [f"{typ.title()}: {', '.join(sels)}" for typ, sels in selections.items()]
+                summary = "; ".join(parts) if parts else "no add-ons"
+                response_text = f"Got it! I've added {summary} to your order. Anything else?"
         # Handle fetch_restaurant_info function
         elif func_name == "fetch_restaurant_info":
             result = self.fetch_restaurant_info()

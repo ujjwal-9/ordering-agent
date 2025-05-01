@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Union
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -25,6 +25,9 @@ class ConversationBufferMemory:
         self.order_confirmed: bool = False
         self.last_interaction_time: datetime = datetime.now()
         self.tool_chain: List[str] = []
+        # State for sequential add-on selection flow
+        # addon_flow: { options: Dict[type, List[addon]], types: List[type], current_index: int }
+        self.addon_flow: Optional[Dict[str, Any]] = None
 
     def add_message(
         self,
@@ -130,3 +133,59 @@ class ConversationBufferMemory:
     def get_memory_size(self) -> int:
         """Get the size of the memory."""
         return len(self.messages)
+    
+    def record_addon_selection(self, addon_type: str, selection: Union[str, List[str]]) -> None:
+        """Record the customer's selection for a given add-on type."""
+        if not self.addon_flow:
+            return
+        # Normalize to list of strings
+        selections_list = []
+        if isinstance(selection, str):
+            # Split on commas in case of multiple selections
+            selections_list = [s.strip() for s in selection.split(",") if s.strip()]
+        else:
+            selections_list = list(selection)
+        self.addon_flow["selections"][addon_type] = selections_list
+    
+    # Methods to manage sequential add-on selection
+    def init_addon_flow(self, addon_options: Dict[str, list]) -> None:
+        """Initialize the add-on selection flow with available options."""
+        type_order = ["size", "sauce", "topping", "other"]
+        # Only include types that have available options
+        types = [t for t in type_order if t in addon_options and addon_options[t]]
+        self.addon_flow = {
+            "options": addon_options,
+            "types": types,
+            "current_index": 0,
+            "selections": {},
+        }
+
+    def get_current_addon_type(self) -> Optional[str]:
+        """Get the current add-on type to present next, or None if done."""
+        if not self.addon_flow:
+            return None
+        idx = self.addon_flow.get("current_index", 0)
+        types = self.addon_flow.get("types", [])
+        if idx is None or idx < 0 or idx >= len(types):
+            return None
+        return types[idx]
+
+    def advance_addon_flow(self) -> None:
+        """Advance to the next add-on type in the flow."""
+        if not self.addon_flow:
+            return
+        self.addon_flow["current_index"] = self.addon_flow.get("current_index", 0) + 1
+
+    def is_addon_flow_complete(self) -> bool:
+        """Return True if all add-on types have been presented."""
+        if not self.addon_flow:
+            return True
+        idx = self.addon_flow.get("current_index", 0)
+        types = self.addon_flow.get("types", [])
+        return idx >= len(types)
+
+    def get_addon_selections(self) -> Dict[str, list]:
+        """Return the selections made during the add-on flow."""
+        if not self.addon_flow:
+            return {}
+        return self.addon_flow.get("selections", {})

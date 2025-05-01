@@ -215,12 +215,34 @@ def prepare_tools():
                     "properties": {
                         "message": {
                             "type": "string",
-                            "description": "The message you will say before ending the call with the customer.",
-                        },
+                            "description": "The message you will say before ending the call with the customer."
+                        }
                     },
-                    "required": ["message"],
-                },
-            },
+                    "required": ["message"]
+                }
+            }
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "record_addons",
+                "description": "Record customer's add-on selection during the add-on selection flow.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "addon_type": {
+                            "type": "string",
+                            "description": "The type/category of add-on being selected (size, sauce, topping, other)."
+                        },
+                        "selection": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "The customer's selection(s) for this add-on type."
+                        }
+                    },
+                    "required": ["addon_type", "selection"]
+                }
+            }
+        }
     ]
     return functions
