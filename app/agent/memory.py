@@ -28,6 +28,9 @@ class ConversationBufferMemory:
         # State for sequential add-on selection flow
         # addon_flow: { options: Dict[type, List[addon]], types: List[type], current_index: int }
         self.addon_flow: Optional[Dict[str, Any]] = None
+        # Track the currently confirmed menu item to prevent re-running verify_order_item
+        self.current_item: Optional[Dict[str, Any]] = None
+        self.item_confirmed: bool = False
 
     def add_message(
         self,
@@ -66,6 +69,9 @@ class ConversationBufferMemory:
         """Clear the conversation history."""
         self.messages = []
         self.current_order = {"items": [], "total": 0.0, "status": None}
+        # Reset item confirmation state
+        self.current_item = None
+        self.item_confirmed = False
         self.last_interaction_time = datetime.now()
 
     def update_customer_info(self, **kwargs) -> None:
@@ -133,8 +139,10 @@ class ConversationBufferMemory:
     def get_memory_size(self) -> int:
         """Get the size of the memory."""
         return len(self.messages)
-    
-    def record_addon_selection(self, addon_type: str, selection: Union[str, List[str]]) -> None:
+
+    def record_addon_selection(
+        self, addon_type: str, selection: Union[str, List[str]]
+    ) -> None:
         """Record the customer's selection for a given add-on type."""
         if not self.addon_flow:
             return
@@ -146,7 +154,7 @@ class ConversationBufferMemory:
         else:
             selections_list = list(selection)
         self.addon_flow["selections"][addon_type] = selections_list
-    
+
     # Methods to manage sequential add-on selection
     def init_addon_flow(self, addon_options: Dict[str, list]) -> None:
         """Initialize the add-on selection flow with available options."""

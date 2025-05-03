@@ -64,7 +64,7 @@ def prepare_tools():
             "type": "function",
             "function": {
                 "name": "verify_order_item",
-                "description": "Verify if a order item exists and find similar items if it doesn't. It is used when customer has selected a menu item to order.",
+                "description": "When user makes a direct order, use this function to verify the order item and add-ons.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -104,7 +104,7 @@ def prepare_tools():
                         },
                         "order_items": {
                             "type": "array",
-                            "description": "List of items in the order, if an item is ordered with different addons, then decouple the item and the addons into different objects in the array",
+                            "description": "List of items in the order, if an item is ordered with different addons, then decouple the item and the addons into different objects in the array. For example, if the customer orders 2 burgers. Two burgers with cheese and 'ketchup', and one with 'lettuce' and 'tomato', then the order_items array should have two objects: [{'item_name': 'burger', 'quantity': 2, 'add_ons': ['cheese', 'ketchup']}, {'item_name': 'burger', 'quantity': 1, 'add_ons': ['lettuce', 'tomato']}]",
                             "items": {
                                 "type": "object",
                                 "properties": {
@@ -152,7 +152,7 @@ def prepare_tools():
                     "properties": {
                         "category": {
                             "type": "string",
-                            "description": "The category of the menu items to fetch",
+                            "description": "The category of the menu items to fetch, for example 'burger' or 'pizza'",
                         },
                     },
                     "required": ["category"],
@@ -166,13 +166,8 @@ def prepare_tools():
                 "description": "Fetch all available menu items organized by category. It is used when customer has chosen a category to read through.",
                 "parameters": {
                     "type": "object",
-                    "properties": {
-                        "category": {
-                            "type": "string",
-                            "description": "The category of the menu items to fetch",
-                        },
-                    },
-                    "required": ["category"],
+                    "properties": {},
+                    "required": [],
                 },
             },
         },
@@ -180,13 +175,13 @@ def prepare_tools():
             "type": "function",
             "function": {
                 "name": "fetch_addons",
-                "description": "Get available add-ons for a specific menu item. It is used when customer has chosen a menu item to order.",
+                "description": "Get available add-ons for a specific menu item category. It is used when customer has chosen a menu item to order.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "category": {
                             "type": "string",
-                            "description": "The category of the add-ons to fetch",
+                            "description": "The category of menu item to fetch add-ons for. For example, 'burger' or 'pizza'",
                         },
                     },
                     "required": ["category"],
@@ -215,12 +210,12 @@ def prepare_tools():
                     "properties": {
                         "message": {
                             "type": "string",
-                            "description": "The message you will say before ending the call with the customer."
+                            "description": "The message you will say before ending the call with the customer.",
                         }
                     },
-                    "required": ["message"]
-                }
-            }
+                    "required": ["message"],
+                },
+            },
         },
         {
             "type": "function",
@@ -232,17 +227,17 @@ def prepare_tools():
                     "properties": {
                         "addon_type": {
                             "type": "string",
-                            "description": "The type/category of add-on being selected (size, sauce, topping, other)."
+                            "description": "The type/category of add-on being selected (size, sauce, topping, other).",
                         },
                         "selection": {
                             "type": "array",
                             "items": {"type": "string"},
-                            "description": "The customer's selection(s) for this add-on type."
-                        }
+                            "description": "The customer's selection(s) for this add-on type.",
+                        },
                     },
-                    "required": ["addon_type", "selection"]
-                }
-            }
-        }
+                    "required": ["addon_type", "selection"],
+                },
+            },
+        },
     ]
     return functions

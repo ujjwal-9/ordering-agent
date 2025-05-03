@@ -317,6 +317,7 @@ class Database:
         try:
             # Get or create customer
             customer = self.get_customer_by_phone(customer_phone)
+            print(f"Customer: {customer}")
             if not customer:
                 customer = self.create_customer(
                     name=customer_name, phone=customer_phone, auto_commit=True

@@ -226,17 +226,16 @@ export default function OrderDetailsPage({ params }: any) {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {order.order_items.map((item, index) => (
-                <div key={`${item.menu_item_id}-${index}`}>
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <p className="font-medium">{item.quantity}x {item.menu_item_name}</p>
-                      <p className="text-sm text-gray-500">{formatPrice(item.base_price)} each</p>
-                    </div>
-                    <p className="font-medium">{formatPrice(item.total_price)}</p>
+              {order.order_items.map((item, i) => (
+                <div key={i} className="flex flex-col">
+                  <div className="flex justify-between text-sm">
+                    <span>{item.quantity}x {item.menu_item_name}</span>
+                    <span>{formatPrice(item.total_price)}</span>
                   </div>
-                  {index < order.order_items.length - 1 && (
-                    <Separator className="my-2" />
+                  {item.add_ons && item.add_ons.length > 0 && (
+                    <div className="text-xs text-gray-500 ml-4">
+                      + {item.add_ons.map(ao => ao.add_on_name).join(', ')}
+                    </div>
                   )}
                 </div>
               ))}

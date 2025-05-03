@@ -23,6 +23,7 @@ if (typeof window !== 'undefined') {
 // Add request interceptor to include auth token
 api.interceptors.request.use(
   (config) => {
+    console.log(`API Request: ${config.method?.toUpperCase()} ${config.baseURL}${config.url}`, config);
     const token = localStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -34,7 +35,10 @@ api.interceptors.request.use(
 
 // Add response interceptor to handle auth errors
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    console.log(`API Response: ${response.config.method?.toUpperCase()} ${response.config.url}`, response.data);
+    return response;
+  },
   (error) => {
     if (error.response && error.response.status === 401) {
       // Clear auth data on 401 errors
@@ -271,6 +275,43 @@ export const addOnApi = {
   },
 };
 
+// Normalize order payloads to ensure order_items is parsed as an array
+const normalizeOrder = (order: any) => {
+  // Ensure order_items is an array
+  let items = order.order_items;
+  if (typeof items === 'string') {
+    try {
+      items = JSON.parse(items);
+    } catch {
+      console.error('Failed to parse order_items JSON string:', items);
+      items = [];
+    }
+  }
+  if (!Array.isArray(items)) {
+    items = [];
+  }
+  // Standardize each item
+  const standardized = items.map((item: any) => {
+    const menu_item_id = item.menu_item_id ?? item.id ?? null;
+    const menu_item_name = item.menu_item_name ?? item.item_name ?? '';
+    const quantity = item.quantity ?? 0;
+    const base_price = item.base_price ?? item.price ?? 0;
+    const total_price = item.total_price ?? quantity * base_price;
+    const add_ons_raw = item.add_ons ?? [];
+    const add_ons = add_ons_raw.map((ao: any) =>
+      typeof ao === 'string'
+        ? { add_on_id: null, add_on_name: ao, price: 0 }
+        : {
+            add_on_id: ao.add_on_id ?? ao.id ?? null,
+            add_on_name: ao.add_on_name ?? ao.name ?? '',
+            price: ao.price ?? 0,
+          }
+    );
+    return { menu_item_id, menu_item_name, quantity, base_price, total_price, add_ons };
+  });
+  return { ...order, order_items: standardized };
+};
+
 // Order related API calls
 export const orderApi = {
   // Get all orders
@@ -278,7 +319,8 @@ export const orderApi = {
     try {
       const url = status ? `/orders?status=${status}` : '/orders';
       const response = await api.get(url);
-      return response.data;
+      const data = response.data;
+      return Array.isArray(data) ? data.map(normalizeOrder) : [];
     } catch (error) {
       throw error;
     }
@@ -288,7 +330,7 @@ export const orderApi = {
   getById: async (id: string | number) => {
     try {
       const response = await api.get(`/orders/${id}`);
-      return response.data;
+      return normalizeOrder(response.data);
     } catch (error) {
       throw error;
     }
@@ -298,7 +340,7 @@ export const orderApi = {
   create: async (orderData: any) => {
     try {
       const response = await api.post('/orders', orderData);
-      return response.data;
+      return normalizeOrder(response.data);
     } catch (error) {
       throw error;
     }
@@ -308,14 +350,11 @@ export const orderApi = {
   updateStatus: async (id: string | number, status: string, estimatedTime?: number) => {
     try {
       const data: any = { status };
-      
-      // Add estimated time if provided
       if (estimatedTime !== undefined) {
         data.estimated_preparation_time = estimatedTime;
       }
-      
       const response = await api.put(`/orders/${id}/status`, data);
-      return response.data;
+      return normalizeOrder(response.data);
     } catch (error) {
       throw error;
     }

@@ -62,8 +62,10 @@ export default function OrdersPage() {
 
   const fetchOrders = async () => {
     try {
+      console.log("OrdersPage: fetching orders...");
       setIsLoading(true);
       const ordersData = await orderApi.getAll();
+      console.log("OrdersPage: received ordersData:", ordersData);
       setOrders(ordersData);
     } catch (error) {
       console.error("Error fetching orders:", error);
@@ -213,6 +215,11 @@ export default function OrdersPage() {
                   {order.order_items.map((item, index) => (
                     <div key={`${item.menu_item_id}-${index}`} className="text-sm">
                       {item.quantity}x {item.menu_item_name}
+                      {item.add_ons && item.add_ons.length > 0 && (
+                        <div className="text-xs text-gray-500 ml-4">
+                          + {item.add_ons.map(ao => ao.add_on_name).join(', ')}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </TableCell>

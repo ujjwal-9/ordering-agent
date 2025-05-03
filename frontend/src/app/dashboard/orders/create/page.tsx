@@ -12,15 +12,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 
-import { orderApi, menuApi } from "@/lib/api/api-service";
+import { orderApi, menuApi, addOnApi } from "@/lib/api/api-service";
 import { formatPrice } from "@/lib/utils";
-import { MenuItem, OrderCreate, OrderItem } from "@/lib/api/types";
+import { MenuItem, OrderCreate, OrderItem, AddOn } from "@/lib/api/types";
 
 export default function CreateOrderPage() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(true);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [availableAddOns, setAvailableAddOns] = useState<AddOn[]>([]);
   const [selectedItems, setSelectedItems] = useState<OrderItem[]>([]);
   const [customerInfo, setCustomerInfo] = useState({
     name: "",
@@ -28,6 +30,10 @@ export default function CreateOrderPage() {
   });
   const [specialInstructions, setSpecialInstructions] = useState("");
   const [submitLoading, setSubmitLoading] = useState(false);
+  // Modal states for add-ons selection
+  const [modalItem, setModalItem] = useState<MenuItem | null>(null);
+  const [modalQuantity, setModalQuantity] = useState(1);
+  const [modalSelectedAddOns, setModalSelectedAddOns] = useState<AddOn[]>([]);
 
   // Calculate total amount of order
   const totalAmount = selectedItems.reduce(
@@ -40,6 +46,8 @@ export default function CreateOrderPage() {
       try {
         setIsLoading(true);
         const items = await menuApi.getAll();
+        const addons = await addOnApi.getAll();
+        setAvailableAddOns(addons);
         // Filter out unavailable items
         const availableItems = items.filter(
           (item: MenuItem) => item.is_available
@@ -66,9 +74,13 @@ export default function CreateOrderPage() {
       // If item exists, increment quantity
       const updatedItems = [...selectedItems];
       updatedItems[existingItemIndex].quantity++;
+      const addonsTotal = (updatedItems[existingItemIndex].add_ons || []).reduce(
+        (sum, ao) => sum + ao.price,
+        0
+      );
       updatedItems[existingItemIndex].total_price =
         updatedItems[existingItemIndex].quantity *
-        updatedItems[existingItemIndex].base_price;
+        updatedItems[existingItemIndex].base_price + addonsTotal;
       setSelectedItems(updatedItems);
     } else {
       // If item doesn't exist, add it
@@ -78,6 +90,7 @@ export default function CreateOrderPage() {
         quantity: 1,
         base_price: menuItem.base_price,
         total_price: menuItem.base_price,
+        add_ons: [],
       };
       setSelectedItems([...selectedItems, newItem]);
     }
@@ -97,8 +110,12 @@ export default function CreateOrderPage() {
 
     const updatedItems = [...selectedItems];
     updatedItems[index].quantity = quantity;
+    const addonsTotal = (updatedItems[index].add_ons || []).reduce(
+      (sum, ao) => sum + ao.price,
+      0
+    );
     updatedItems[index].total_price =
-      quantity * updatedItems[index].base_price;
+      quantity * updatedItems[index].base_price + addonsTotal;
     setSelectedItems(updatedItems);
   };
 
@@ -182,6 +199,57 @@ export default function CreateOrderPage() {
     }
   };
 
+  // Toggle an add-on for a selected item
+  const toggleAddOn = (itemIndex: number, ao: AddOn) => {
+    setSelectedItems((prev) => {
+      const newItems = [...prev];
+      const item = newItems[itemIndex];
+      const existing = item.add_ons?.find((x) => x.add_on_id === ao.id);
+      if (existing) {
+        // remove
+        item.add_ons = item.add_ons?.filter((x) => x.add_on_id !== ao.id) || [];
+      } else {
+        item.add_ons = [
+          ... (item.add_ons || []),
+          { add_on_id: ao.id, add_on_name: ao.name, price: ao.price },
+        ];
+      }
+      // Recalculate total price
+      const addonsTotal = item.add_ons.reduce((sum, x) => sum + x.price, 0);
+      item.total_price = item.quantity * item.base_price + addonsTotal;
+      return newItems;
+    });
+  };
+
+  // Handlers for modal
+  const openAddItemModal = (menuItem: MenuItem) => {
+    setModalItem(menuItem);
+    setModalQuantity(1);
+    setModalSelectedAddOns([]);
+  };
+  const closeAddItemModal = () => setModalItem(null);
+  const toggleModalAddOn = (ao: AddOn) => {
+    setModalSelectedAddOns(prev =>
+      prev.some(x => x.id === ao.id)
+        ? prev.filter(x => x.id !== ao.id)
+        : [...prev, ao]
+    );
+  };
+  const addModalItemToOrder = () => {
+    if (!modalItem) return;
+    const addonsTotal = modalSelectedAddOns.reduce((sum, ao) => sum + ao.price, 0);
+    const newItem: OrderItem = {
+      menu_item_id: modalItem.id,
+      menu_item_name: modalItem.name,
+      quantity: modalQuantity,
+      base_price: modalItem.base_price,
+      add_ons: modalSelectedAddOns.map(ao => ({ add_on_id: ao.id, add_on_name: ao.name, price: ao.price })),
+      total_price: modalQuantity * modalItem.base_price + addonsTotal,
+    };
+    setSelectedItems(prev => [...prev, newItem]);
+    closeAddItemModal();
+  };
+
   // Fallback for loading state
   if (isLoading) {
     return (
@@ -233,7 +301,7 @@ export default function CreateOrderPage() {
                     <Button
                       className="w-full mt-3"
                       size="sm"
-                      onClick={() => handleAddItem(menuItem)}
+                      onClick={() => openAddItemModal(menuItem)}
                     >
                       <Plus className="h-4 w-4 mr-1" />
                       Add
@@ -350,6 +418,12 @@ export default function CreateOrderPage() {
                       {index < selectedItems.length - 1 && (
                         <Separator className="my-2" />
                       )}
+                      {/* Show only selected add-ons */}
+                      {item.add_ons && item.add_ons.length > 0 && (
+                        <div className="text-xs text-gray-500 ml-4">
+                          + {item.add_ons.map(ao => ao.add_on_name).join(', ')}
+                        </div>
+                      )}
                     </div>
                   ))}
 
@@ -383,6 +457,51 @@ export default function CreateOrderPage() {
           </Card>
         </div>
       </div>
+
+      {/* Add-ons Modal */}
+      <Dialog open={!!modalItem} onOpenChange={open => !open && closeAddItemModal()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Select Add-ons for {modalItem?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div>
+              <Label>Quantity</Label>
+              <div className="flex items-center space-x-2 mt-1">
+                <Button size="icon" variant="outline" onClick={() => setModalQuantity(q => Math.max(1, q - 1))}>
+                  <Minus className="h-4 w-4" />
+                </Button>
+                <span>{modalQuantity}</span>
+                <Button size="icon" variant="outline" onClick={() => setModalQuantity(q => q + 1)}>
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            <div>
+              <Label>Add-ons</Label>
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                {availableAddOns.filter(ao => ao.category === modalItem?.category).map(ao => {
+                  const selected = modalSelectedAddOns.some(x => x.id === ao.id);
+                  return (
+                    <Button
+                      key={ao.id}
+                      size="sm"
+                      variant={selected ? undefined : "outline"}
+                      onClick={() => toggleModalAddOn(ao)}
+                    >
+                      {ao.name}{ao.price ? ` (+${formatPrice(ao.price)})` : ''}
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeAddItemModal}>Cancel</Button>
+            <Button onClick={addModalItemToOrder}>Add to Order</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 } 

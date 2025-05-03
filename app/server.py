@@ -33,6 +33,7 @@ from app.db_operations import (
     Restaurant,
     Customer,
 )
+from app.db_operations.database import Order
 
 load_dotenv(override=True)
 app = FastAPI()
@@ -462,6 +463,42 @@ async def delete_addon(addon_id: int, current_user: User = Depends(get_current_u
         )
 
 
+# FIRST_EDIT: define helper to normalize raw order_items to uniform shape
+def normalize_order_items(raw_items):
+    normalized = []
+    for item in raw_items or []:
+        menu_item_id = item.get("menu_item_id") or item.get("id")
+        menu_item_name = item.get("menu_item_name") or item.get("item_name")
+        quantity = item.get("quantity", 0)
+        base_price = item.get("base_price") or item.get("price") or 0
+        total_price = item.get("total_price") or quantity * base_price
+        add_ons_raw = item.get("add_ons") or []
+        add_ons = []
+        for ao in add_ons_raw:
+            if isinstance(ao, dict):
+                add_on_id = ao.get("add_on_id") or ao.get("id")
+                add_on_name = ao.get("add_on_name") or ao.get("name")
+                price = ao.get("price") or 0
+            else:
+                add_on_id = None
+                add_on_name = ao
+                price = 0
+            add_ons.append(
+                {"add_on_id": add_on_id, "add_on_name": add_on_name, "price": price}
+            )
+        normalized.append(
+            {
+                "menu_item_id": menu_item_id,
+                "menu_item_name": menu_item_name,
+                "quantity": quantity,
+                "base_price": base_price,
+                "total_price": total_price,
+                "add_ons": add_ons,
+            }
+        )
+    return normalized
+
+
 # API endpoint for orders
 @app.get("/orders")
 async def get_orders(
@@ -478,7 +515,7 @@ async def get_orders(
             "customer_id": order.customer_id,
             "customer_name": order.customer_name,
             "customer_phone": order.customer_phone,
-            "order_items": order.order_items,
+            "order_items": normalize_order_items(order.order_items),
             "total_amount": order.total_amount,
             "status": order.status,
             "estimated_preparation_time": order.estimated_preparation_time,
@@ -551,7 +588,7 @@ async def get_order_by_id(
         "customer_id": order.customer_id,
         "customer_name": order.customer_name,
         "customer_phone": order.customer_phone,
-        "order_items": order.order_items,
+        "order_items": normalize_order_items(order.order_items),
         "total_amount": order.total_amount,
         "status": order.status,
         "estimated_preparation_time": order.estimated_preparation_time,

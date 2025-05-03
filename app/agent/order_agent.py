@@ -113,8 +113,14 @@ class OrderAgent:
         return prompt
 
     def prepare_tools(self):
-        """Prepare the function definitions for the OpenAI API."""
-        return prepare_tools()
+        """Prepare the function definitions for the OpenAI API, filtering out verify_order_item after an item is confirmed."""
+        tools = prepare_tools()
+        # If the customer has already confirmed an item, no need to re-verify it
+        if getattr(self.memory, "item_confirmed", False):
+            tools = [
+                fn for fn in tools if fn["function"]["name"] != "verify_order_item"
+            ]
+        return tools
 
     async def draft_response(self, request: ResponseRequiredRequest):
         prompt = self.prepare_prompt(request)
