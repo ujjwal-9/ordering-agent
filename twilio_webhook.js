@@ -1,5 +1,5 @@
 // Load environment variables from .env file
-require('dotenv').config();
+require('dotenv').config({path: '.env'});
 
 const express = require('express');
 const Retell = require('retell-sdk').Retell;
@@ -12,6 +12,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true })); // For parsing application/x-www-form-urlencoded
 
 // Initialize Retell client with API key from environment variable
+console.log(process.env.RETELL_AGENT_ID);
 const client = new Retell({
   apiKey: process.env.RETELL_API_KEY,
 });
