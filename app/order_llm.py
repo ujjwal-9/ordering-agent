@@ -31,6 +31,7 @@ agent_prompt = """Task: As a professional restaurant order assistant for Tote AI
 - If new, collect their information after the order is complete
 
 2. Menu Knowledge:
+- Ask the customer if they would like to see the menu
 - Offer ONLY items that are available in the database
 - Check the 'is_available' column before suggesting any item - if it's 0, the item is NOT available
 - Inform customers when a requested item is unavailable and suggest alternatives
@@ -40,6 +41,7 @@ agent_prompt = """Task: As a professional restaurant order assistant for Tote AI
 - Never make up or invent menu items that aren't available in the database
 
 3. Order Taking:
+- Ask the customer if they would like to see the menu
 - Guide customers through the ordering process
 - Only offer items that exist in the database AND are marked as available
 - DO NOT verify or confirm each item immediately after a customer selects it
@@ -75,6 +77,7 @@ agent_prompt = """Task: As a professional restaurant order assistant for Tote AI
 - Clearly communicate the pickup address when the order is confirmed
 
 7. CRITICAL - Avoiding Loops:
+- Ask the customer if they would like to see the menu
 - NEVER ask the same confirmation question twice
 - After a customer confirms information, acknowledge it and MOVE ON to the next step
 - If a customer says "yes," "correct," "that's right," or similar, immediately proceed to the next step
@@ -91,6 +94,7 @@ class OrderAgent:
         self.db = Database()
         self.from_number = None  # Store the caller's phone number from the request
         self.verified_customer = None  # Store verified customer information
+        self.current_order = None  # Store the current order information
 
     def set_from_number(self, from_number):
         """Set the caller's phone number from the call request"""
@@ -272,7 +276,7 @@ You are a friendly and enthusiastic voice AI order assistant for Tote AI Restaur
    - Wait for confirmation of that information before proceeding
    - For phone numbers, ALWAYS wait for customer confirmation before moving to order taking
    - IMPORTANT: After the customer confirms their phone number, DO NOT ask for confirmation again
-   - After phone number confirmation, say something like "Great! Let me tell you about our menu..." and proceed
+   - After phone number confirmation, say something like "Great! Would you like to see our menu?" and proceed
    - Only after confirmation of customer details, proceed to menu presentation or order taking
 
 ## Handling Confirmation Responses
@@ -315,6 +319,7 @@ When discussing the menu:
 - Do not ask "Do you want to confirm this item?" or similar verification questions
 - Save all confirmation for the END of the order process
 - Only after the customer says they don't want anything else, do a SINGLE confirmation of the entire order
+- If you have already told the customer the restaurant name, address, and phone number, do not repeat it.
 """
                 + menu_info
                 + "\n## Role\n"
@@ -435,7 +440,7 @@ When discussing the menu:
                 "type": "function",
                 "function": {
                     "name": "create_order",
-                    "description": "Create a new order in the database.",
+                    "description": "Create a new order or update existing order in the database.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -461,6 +466,10 @@ When discussing the menu:
                                         },
                                     },
                                 },
+                            },
+                            "is_update": {
+                                "type": "boolean",
+                                "description": "Whether this is an update to an existing order",
                             },
                         },
                         "required": [
@@ -914,17 +923,76 @@ When discussing the menu:
                         )
                         return
 
+                    # Check if this is an update to an existing order
+                    is_update = False
+                    if self.current_order:
+                        is_update = True
+                        logger.info(f"Updating existing order #{self.current_order.id}")
+
+                    # Transform order items into the required format with database queries
+                    raw_order_items = func_call["arguments"]["order_items"]
+                    formatted_order_items = []
+
+                    for item in raw_order_items:
+                        # Get menu item details including ID from database
+                        menu_item = self.db.find_similar_menu_item(item["item_name"])
+
+                        if not menu_item or getattr(menu_item, "is_available", 1) == 0:
+                            logger.warning(
+                                f"Menu item not found or unavailable: {item['item_name']}"
+                            )
+                            continue
+
+                        quantity = item.get("quantity", 1)
+                        base_price = menu_item.base_price
+
+                        # Process add-ons
+                        formatted_add_ons = []
+                        total_add_on_price = 0
+
+                        for addon_name in item.get("add_ons", []):
+                            # Find add-on in database to get its ID and price
+                            add_ons = self.db.get_add_ons(menu_item.category)
+                            addon = next(
+                                (a for a in add_ons if a.name == addon_name), None
+                            )
+
+                            if addon:
+                                formatted_add_ons.append(
+                                    {
+                                        "add_on_id": addon.id,
+                                        "add_on_name": addon.name,
+                                        "price": addon.price,
+                                    }
+                                )
+                                total_add_on_price += addon.price
+
+                        # Calculate total price for this item
+                        total_price = (base_price + total_add_on_price) * quantity
+
+                        # Format the order item
+                        formatted_order_items.append(
+                            {
+                                "menu_item_id": menu_item.id,
+                                "menu_item_name": menu_item.name,
+                                "quantity": quantity,
+                                "base_price": base_price,
+                                "total_price": total_price,
+                                "add_ons": formatted_add_ons,
+                            }
+                        )
+
+                    # Calculate total amount for the entire order
+                    total_amount = sum(
+                        item["total_price"] for item in formatted_order_items
+                    )
+
                     order_data = {
                         "customer_name": func_call["arguments"]["customer_name"],
                         "customer_phone": customer_phone_str,
-                        "order_items": func_call["arguments"]["order_items"],
+                        "order_items": formatted_order_items,
+                        "total_amount": total_amount,
                     }
-
-                    # Calculate total amount
-                    total_amount = self._calculate_total_amount(
-                        order_data["order_items"]
-                    )
-                    order_data["total_amount"] = total_amount
 
                     try:
                         # Add special instructions if provided
@@ -947,28 +1015,46 @@ When discussing the menu:
                             else "123 Main Street, Downtown, CA 94123"
                         )
 
-                        # Create order with transaction management
-                        order = self.db.create_order(**order_data, auto_commit=True)
+                        # Create a new order or update the existing one
+                        if is_update:
+                            # Update the existing order
+                            order = self.db.update_order(
+                                self.current_order.id,
+                                order_items=formatted_order_items,
+                                total_amount=total_amount,
+                                special_instructions=order_data.get(
+                                    "special_instructions"
+                                ),
+                                payment_method=order_data.get("payment_method"),
+                                auto_commit=True,
+                            )
+                            confirmation_message = f"I've updated your order. Your order number is still #{order.id}."
+                        else:
+                            # Create a new order
+                            order = self.db.create_order(**order_data, auto_commit=True)
+                            self.current_order = order  # Store the current order
+                            confirmation_message = f"Great! I've placed your order. Your order number is #{order.id}."
 
-                        pickup_phone = (
-                            restaurant.phone if restaurant else "(555) 123-4567"
-                        )
-                        pickup_hours = (
-                            restaurant.opening_hours
-                            if restaurant
-                            else "Monday-Sunday: 11:00 AM - 10:00 PM"
-                        )
+                        # Construct the confirmation message
+                        confirmation_message += " We will send you a confirmation text shortly along with order details and estimated pickup time."
+                        confirmation_message += f" You can pick up your order at our restaurant located at {pickup_address}."
+
+                        # Add a note about being able to update the order
+                        if not is_update:
+                            confirmation_message += " If you need to make any changes to your order, just let me know and I can update it for you."
 
                         yield ResponseResponse(
                             response_id=request.response_id,
-                            content=f"Great! I've placed your order. Your order number is #{order.id}. We will send you a confirmation text shortly along with order details and estimated pickup time. You can pick up your order at our restaurant located at {pickup_address}.",
+                            content=confirmation_message,
                             content_complete=True,
                             end_call=False,
                         )
                     except Exception as e:
                         # Rollback in case of error
                         self.db.session.rollback()
-                        logger.error(f"Error creating order in database: {str(e)}")
+                        logger.error(
+                            f"Error creating/updating order in database: {str(e)}"
+                        )
                         import traceback
 
                         logger.error(f"Traceback: {traceback.format_exc()}")
@@ -1089,6 +1175,17 @@ When discussing the menu:
 
     def _calculate_total_amount(self, order_items):
         """Calculate the total amount for an order based on the menu items and their add-ons."""
+        # This is now handled directly in the create_order function
+        # We'll keep this for backward compatibility
+        if (
+            order_items
+            and isinstance(order_items[0], dict)
+            and "total_price" in order_items[0]
+        ):
+            # If we have the new format with total_price already calculated
+            return sum(item["total_price"] for item in order_items)
+
+        # Legacy calculation for old format
         print(f"Calculating total amount for order: {order_items}")
         total = 0
         for item in order_items:

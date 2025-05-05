@@ -469,6 +469,88 @@ class Database:
             return order
         return None
 
+    def update_order(
+        self,
+        order_id,
+        order_items=None,
+        total_amount=None,
+        payment_method=None,
+        special_instructions=None,
+        status=None,
+        auto_commit=False,
+    ):
+        """Update an existing order with new items, total amount, etc."""
+        try:
+            # Find the order by ID
+            order = self.session.query(Order).filter(Order.id == order_id).first()
+            if not order:
+                print(f"Order not found with ID: {order_id}")
+                return None
+
+            print(
+                f"Updating order {order_id} with {len(order_items) if order_items else 0} items"
+            )
+
+            # Update order fields if provided
+            if order_items is not None:
+                # Ensure order_items is properly serialized as JSON if needed
+                if not isinstance(order_items, str):
+                    try:
+                        # Check if we can serialize and deserialize it
+                        json.dumps(order_items)
+                        order.order_items = order_items
+                        print(f"Successfully updated order items")
+                    except Exception as e:
+                        print(f"Error serializing updated order_items: {e}")
+                        raise
+                else:
+                    order.order_items = order_items
+
+            if total_amount is not None:
+                order.total_amount = total_amount
+                print(f"Updated total amount to: ${total_amount}")
+
+            if payment_method is not None:
+                order.payment_method = payment_method
+
+            if special_instructions is not None:
+                order.special_instructions = special_instructions
+
+            if status is not None:
+                order.status = status
+
+            # If order items changed, recalculate the preparation time
+            if order_items is not None:
+                estimated_preparation_time = self._calculate_preparation_time(
+                    order_items
+                )
+                order.estimated_preparation_time = estimated_preparation_time
+                print(
+                    f"Updated preparation time to: {estimated_preparation_time} minutes"
+                )
+
+            # Update the updated_at timestamp
+            order.updated_at = datetime.utcnow()
+
+            # Flush changes
+            self.session.flush()
+            print(f"Order {order_id} updated successfully")
+
+            # Auto-commit if requested
+            if auto_commit:
+                if not self.safe_commit():
+                    print("Failed to commit order update after multiple retries")
+                    raise Exception("Failed to commit order update")
+
+            return order
+        except Exception as e:
+            import traceback
+
+            print(f"Error updating order: {e}")
+            print(f"Traceback: {traceback.format_exc()}")
+            self.session.rollback()
+            raise
+
     def safe_commit(self):
         """Safely commit changes to the database."""
         try:
