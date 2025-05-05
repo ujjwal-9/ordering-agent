@@ -648,10 +648,7 @@ class ToolHandler:
                 elif result.get("invalid_add_ons"):
                     invalids = result["invalid_add_ons"]
                     invalid_str = ", ".join(invalids)
-                    response_text = (
-                        f"Sorry, we don't have the {invalid_str} add-ons."
-                        "Would you like to choose different add-ons?"
-                    )
+                    response_text = f"Sorry, we don't have the {invalid_str} add ons. Would you like to choose different add ons?"
                 else:
                     response_text = f"Is that your complete order? or would you like to add anything else?"
             elif result.get("similar_items"):
@@ -664,10 +661,7 @@ class ToolHandler:
                 )
             else:
                 # No menu item found at all
-                response_text = (
-                    f"Sorry, we don't have {item_name} on our menu. "
-                    "Would you like to see our available options?"
-                )
+                response_text = f"Sorry, we don't have {item_name} on our menu. Would you like to see our available options?"
 
         # Handle create_order function
         elif func_name == "create_order":
@@ -900,7 +894,7 @@ You are given a list of menu items and you have to present them in a way that is
                     lines.append(f"Which {addon_type} would you like?")
                     response_text = "\n".join(lines)
                 else:
-                    response_text = "There are no add-ons available for this item."
+                    response_text = "There are no add ons available for this item."
             else:
                 response_text = "I'm having trouble getting the add-on options. Would you like to try something else?"
 
