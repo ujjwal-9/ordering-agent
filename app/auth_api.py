@@ -3,10 +3,19 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
-from app.user_model import UserManager, User
-from app.database import Database
+from app.db.user_model import UserManager, User
+from app.db.database import Database
 import os
 from fastapi import Header
+from dotenv import load_dotenv
+
+if os.path.exists("../.env"):
+    load_dotenv(dotenv_path="../.env")
+# If not found, try .env in current directory
+elif os.path.exists(".env"):
+    load_dotenv(dotenv_path=".env")
+else:
+    raise FileNotFoundError("Environment file not found in either ../.env or .env")
 
 # Initialize router
 router = APIRouter(
@@ -18,9 +27,7 @@ router = APIRouter(
 db = Database()
 
 # Create UserManager
-user_manager = UserManager(
-    db.session, os.getenv("JWT_SECRET_KEY", "default_secret_key")
-)
+user_manager = UserManager(db.session, os.environ["JWT_SECRET_KEY"])
 
 
 # Pydantic models for request and response

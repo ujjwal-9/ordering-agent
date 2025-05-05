@@ -1,5 +1,5 @@
-from app.database import Database, MenuItem, AddOn, Customer, Restaurant
-from app.user_model import User, Base as UserBase
+from app.db.database import Database, MenuItem, AddOn, Customer, Restaurant
+from app.db.user_model import User, Base as UserBase
 from sqlalchemy import inspect
 
 

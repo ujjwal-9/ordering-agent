@@ -2,13 +2,13 @@ from openai import AsyncOpenAI
 import os
 import json
 import logging
-from .custom_types import (
+from ..custom_types import (
     ResponseRequiredRequest,
     ResponseResponse,
     Utterance,
 )
 from typing import List, Tuple, Optional
-from .database import Database
+from ..db.database import Database
 import time
 from .prompts import begin_sentence, agent_prompt, system_prompt, reminder_message
 from .tools import get_tool_definitions

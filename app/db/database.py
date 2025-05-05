@@ -17,7 +17,7 @@ from datetime import datetime
 import os
 import json
 import time
-from app.user_model import User, Base as UserBase
+from app.db.user_model import User, Base as UserBase
 from dotenv import load_dotenv
 
 Base = declarative_base()

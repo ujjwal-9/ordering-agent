@@ -22,10 +22,10 @@ from app.custom_types import (
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any, Union
 
-from app.order_llm import OrderAgent
+from app.agent.order_llm import OrderAgent
 from app.auth_api import router as auth_router, get_current_user
-from app.user_model import User, UserManager
-from app.database import Database, MenuItem, AddOn, Restaurant, Order, Customer
+from app.db.user_model import User, UserManager
+from app.db.database import Database, MenuItem, AddOn, Restaurant, Order, Customer
 
 load_dotenv(override=True)
 app = FastAPI()
