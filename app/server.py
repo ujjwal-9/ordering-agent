@@ -688,6 +688,11 @@ async def update_customer(
 ):
     db = Database()
     update_data = {k: v for k, v in customer.dict().items() if v is not None}
+
+    # Remove phone from update_data to prevent passing it twice
+    if "phone" in update_data:
+        del update_data["phone"]
+
     updated_customer = db.update_customer(phone, auto_commit=True, **update_data)
     if not updated_customer:
         raise HTTPException(status_code=404, detail="Customer not found")
