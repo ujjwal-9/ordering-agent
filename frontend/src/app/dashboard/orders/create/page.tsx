@@ -57,12 +57,12 @@ export default function CreateOrderPage() {
         const addOnsByCategory: { [category: string]: AddOn[] } = {};
         
         for (const category of categories) {
-          const categoryAddOns = await addOnApi.getAll(category);
+          const categoryAddOns = await addOnApi.getAll(category as string);
           // Filter out unavailable add-ons
           const availableAddOns = categoryAddOns.filter(
             (addon: AddOn) => addon.is_available
           );
-          addOnsByCategory[category] = availableAddOns;
+          addOnsByCategory[category as string] = availableAddOns;
         }
         
         setAddOns(addOnsByCategory);
