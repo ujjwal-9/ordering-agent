@@ -1,5 +1,6 @@
 # Byte-compiled / optimized / DLL files
 .env
+logs/
 __pycache__/
 node_modules/
 *.py[cod]
