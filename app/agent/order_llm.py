@@ -10,7 +10,7 @@ from ..custom_types import (
 from typing import List, Tuple, Optional
 from ..db.database import Database
 import time
-from .prompts import begin_sentence, agent_prompt, system_prompt, reminder_message
+from .prompts import welcome_msg, agent_prompt, system_prompt, reminder_message
 from .tools import get_tool_definitions
 from .handler import verify_menu_item_function, handle_function_call
 
@@ -95,9 +95,6 @@ class OrderAgent:
         logger.info(f"Set from_number: {self.from_number}")
 
     def draft_begin_message(self):
-        # Always ask for name first, regardless of whether we have from_number
-        welcome_msg = "Welcome to Tote AI Restaurant! I'm your order assistant. To get started, could you please tell me your name?"
-
         # Log the initial agent message
         conversation_logger.info(
             f"CONV_ID:{self.conversation_id} ROLE:agent MESSAGE:{welcome_msg}"
