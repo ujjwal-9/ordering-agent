@@ -47,7 +47,6 @@ interface Customer {
   phone: string;
   email: string;
   preferred_payment_method: string;
-  dietary_preferences: string;
   total_orders: number;
   last_order_date?: string;
   created_at?: string;
@@ -71,7 +70,6 @@ export default function CustomersPage() {
     phone: "",
     email: "",
     preferred_payment_method: "",
-    dietary_preferences: ""
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -109,7 +107,6 @@ export default function CustomersPage() {
       phone: formatPhoneNumber(customer.phone),
       email: customer.email || "",
       preferred_payment_method: customer.preferred_payment_method || "",
-      dietary_preferences: customer.dietary_preferences || ""
     });
     setIsEditDialogOpen(true);
   };
@@ -169,7 +166,6 @@ export default function CustomersPage() {
         phone: phoneDigits,
         email: customerForm.email || undefined,
         preferred_payment_method: customerForm.preferred_payment_method || undefined,
-        dietary_preferences: customerForm.dietary_preferences || undefined
       };
       
       // Call API to update customer
@@ -263,7 +259,6 @@ export default function CustomersPage() {
               <TableHead>ID</TableHead>
               <TableHead>Name</TableHead>
               <TableHead>Contact</TableHead>
-              <TableHead>Preferences</TableHead>
               <TableHead>Orders</TableHead>
               <TableHead>Payment</TableHead>
             </TableRow>
@@ -286,13 +281,6 @@ export default function CustomersPage() {
                       </div>
                     )}
                   </div>
-                </TableCell>
-                <TableCell>
-                  {!customer.dietary_preferences || customer.dietary_preferences === "no preferences" ? (
-                    <span className="text-gray-500">None</span>
-                  ) : (
-                    <Badge variant="outline">{customer.dietary_preferences}</Badge>
-                  )}
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center">
@@ -379,19 +367,6 @@ export default function CustomersPage() {
                 value={customerForm.preferred_payment_method}
                 onChange={handleFormChange}
                 placeholder="e.g. credit card, cash"
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="dietary" className="text-right">
-                Dietary
-              </Label>
-              <Input
-                id="dietary"
-                name="dietary_preferences"
-                value={customerForm.dietary_preferences}
-                onChange={handleFormChange}
-                placeholder="e.g. vegetarian, gluten-free"
                 className="col-span-3"
               />
             </div>

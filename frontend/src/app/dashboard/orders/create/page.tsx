@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ShoppingBag, Plus, Minus, X, Check } from "lucide-react";
+import { ShoppingBag, Plus, Minus, X, Check, Filter, ChevronDown } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,10 +12,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet";
+import { Checkbox } from "@/components/ui/checkbox";
 
-import { orderApi, menuApi } from "@/lib/api/api-service";
+import { orderApi, menuApi, addOnApi } from "@/lib/api/api-service";
 import { formatPrice } from "@/lib/utils";
-import { MenuItem, OrderCreate, OrderItem } from "@/lib/api/types";
+import { MenuItem, OrderCreate, OrderItem, AddOn } from "@/lib/api/types";
 
 export default function CreateOrderPage() {
   const router = useRouter();
@@ -28,6 +30,10 @@ export default function CreateOrderPage() {
   });
   const [specialInstructions, setSpecialInstructions] = useState("");
   const [submitLoading, setSubmitLoading] = useState(false);
+  const [addOns, setAddOns] = useState<{ [category: string]: AddOn[] }>({});
+  const [isAddOnSheetOpen, setIsAddOnSheetOpen] = useState(false);
+  const [selectedItemIndex, setSelectedItemIndex] = useState<number | null>(null);
+  const [selectedAddOns, setSelectedAddOns] = useState<Array<{add_on_id: number, add_on_name: string, price: number}>>([]);
 
   // Calculate total amount of order
   const totalAmount = selectedItems.reduce(
@@ -45,6 +51,21 @@ export default function CreateOrderPage() {
           (item: MenuItem) => item.is_available
         );
         setMenuItems(availableItems);
+
+        // Fetch add-ons for each category
+        const categories = [...new Set(availableItems.map((item: MenuItem) => item.category))];
+        const addOnsByCategory: { [category: string]: AddOn[] } = {};
+        
+        for (const category of categories) {
+          const categoryAddOns = await addOnApi.getAll(category);
+          // Filter out unavailable add-ons
+          const availableAddOns = categoryAddOns.filter(
+            (addon: AddOn) => addon.is_available
+          );
+          addOnsByCategory[category] = availableAddOns;
+        }
+        
+        setAddOns(addOnsByCategory);
       } catch (error) {
         console.error("Error fetching menu items:", error);
         toast.error("Failed to load menu items");
@@ -57,30 +78,20 @@ export default function CreateOrderPage() {
   }, []);
 
   const handleAddItem = (menuItem: MenuItem) => {
-    // Check if item already in the order
-    const existingItemIndex = selectedItems.findIndex(
-      (item) => item.menu_item_id === menuItem.id
-    );
-
-    if (existingItemIndex !== -1) {
-      // If item exists, increment quantity
-      const updatedItems = [...selectedItems];
-      updatedItems[existingItemIndex].quantity++;
-      updatedItems[existingItemIndex].total_price =
-        updatedItems[existingItemIndex].quantity *
-        updatedItems[existingItemIndex].base_price;
-      setSelectedItems(updatedItems);
-    } else {
-      // If item doesn't exist, add it
-      const newItem: OrderItem = {
-        menu_item_id: menuItem.id,
-        menu_item_name: menuItem.name,
-        quantity: 1,
-        base_price: menuItem.base_price,
-        total_price: menuItem.base_price,
-      };
-      setSelectedItems([...selectedItems, newItem]);
-    }
+    // Always add as a new item to allow unique add-ons for each item
+    const newItem: OrderItem = {
+      menu_item_id: menuItem.id,
+      menu_item_name: menuItem.name,
+      quantity: 1,
+      base_price: menuItem.base_price,
+      total_price: menuItem.base_price,
+      add_ons: []
+    };
+    setSelectedItems([...selectedItems, newItem]);
+    
+    // Optional: Automatically open add-on sheet for the newly added item
+    const newItemIndex = selectedItems.length;
+    setTimeout(() => openAddOnSheet(newItemIndex), 100);
   };
 
   const handleRemoveItem = (index: number) => {
@@ -152,6 +163,60 @@ export default function CreateOrderPage() {
     }
 
     return true;
+  };
+
+  const openAddOnSheet = (index: number) => {
+    // Get the menu item for this order item
+    const orderItem = selectedItems[index];
+    const menuItem = menuItems.find(item => item.id === orderItem.menu_item_id);
+    
+    if (!menuItem) {
+      toast.error("Cannot find menu item information");
+      return;
+    }
+    
+    setSelectedItemIndex(index);
+    setSelectedAddOns(orderItem.add_ons || []);
+    setIsAddOnSheetOpen(true);
+  };
+
+  const handleAddOnToggle = (addOn: AddOn) => {
+    setSelectedAddOns(prev => {
+      // Check if this add-on is already selected
+      const existing = prev.findIndex(item => item.add_on_id === addOn.id);
+      
+      if (existing !== -1) {
+        // Remove it if already selected
+        return prev.filter(item => item.add_on_id !== addOn.id);
+      } else {
+        // Add it if not selected
+        return [...prev, {
+          add_on_id: addOn.id,
+          add_on_name: addOn.name,
+          price: addOn.price
+        }];
+      }
+    });
+  };
+
+  const confirmAddOns = () => {
+    if (selectedItemIndex === null) return;
+    
+    // Calculate total add-on price
+    const addOnTotalPrice = selectedAddOns.reduce((sum, addOn) => sum + addOn.price, 0);
+    
+    // Update the selected item with add-ons
+    const updatedItems = [...selectedItems];
+    const item = updatedItems[selectedItemIndex];
+    
+    // Update the item
+    item.add_ons = selectedAddOns;
+    item.total_price = (item.base_price * item.quantity) + (addOnTotalPrice * item.quantity);
+    
+    setSelectedItems(updatedItems);
+    setIsAddOnSheetOpen(false);
+    setSelectedItemIndex(null);
+    toast.success("Add-ons updated");
   };
 
   const handleCreateOrder = async () => {
@@ -312,38 +377,62 @@ export default function CreateOrderPage() {
                           <p className="text-sm text-gray-500">
                             {formatPrice(item.base_price)} each
                           </p>
+                          {item.add_ons && item.add_ons.length > 0 && (
+                            <div className="mt-1">
+                              <p className="text-xs text-gray-500 font-medium">Add-ons:</p>
+                              <ul className="text-xs text-gray-500 pl-2">
+                                {item.add_ons.map((addon, i) => (
+                                  <li key={i} className="flex justify-between">
+                                    <span>{addon.add_on_name}</span>
+                                    <span>{formatPrice(addon.price)}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
                         </div>
-                        <div className="flex items-center space-x-2">
+                        <div className="flex flex-col items-end gap-2">
+                          <div className="flex items-center space-x-2">
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() =>
+                                handleUpdateQuantity(index, item.quantity - 1)
+                              }
+                            >
+                              <Minus className="h-4 w-4" />
+                            </Button>
+                            <span className="w-6 text-center">
+                              {item.quantity}
+                            </span>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() =>
+                                handleUpdateQuantity(index, item.quantity + 1)
+                              }
+                            >
+                              <Plus className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="h-8 w-8 text-red-500"
+                              onClick={() => handleRemoveItem(index)}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
                           <Button
                             variant="outline"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() =>
-                              handleUpdateQuantity(index, item.quantity - 1)
-                            }
+                            size="sm"
+                            className="text-xs"
+                            onClick={() => openAddOnSheet(index)}
                           >
-                            <Minus className="h-4 w-4" />
-                          </Button>
-                          <span className="w-6 text-center">
-                            {item.quantity}
-                          </span>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() =>
-                              handleUpdateQuantity(index, item.quantity + 1)
-                            }
-                          >
-                            <Plus className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            className="h-8 w-8 text-red-500"
-                            onClick={() => handleRemoveItem(index)}
-                          >
-                            <X className="h-4 w-4" />
+                            <Filter className="h-3 w-3 mr-1" />
+                            Add-ons
                           </Button>
                         </div>
                       </div>
@@ -383,6 +472,86 @@ export default function CreateOrderPage() {
           </Card>
         </div>
       </div>
+
+      {/* Add-ons Selection Sheet */}
+      <Sheet open={isAddOnSheetOpen} onOpenChange={setIsAddOnSheetOpen}>
+        <SheetContent className="w-[400px] sm:max-w-[540px]">
+          <SheetHeader>
+            <SheetTitle>Add Add-ons</SheetTitle>
+          </SheetHeader>
+          
+          {selectedItemIndex !== null && (
+            <div className="py-4">
+              <h3 className="font-medium">
+                {selectedItems[selectedItemIndex]?.menu_item_name}
+              </h3>
+              
+              <div className="mt-4 space-y-4">
+                {menuItems.find(item => item.id === selectedItems[selectedItemIndex]?.menu_item_id)?.category && 
+                  addOns[menuItems.find(item => item.id === selectedItems[selectedItemIndex]?.menu_item_id)?.category as string || '']?.length > 0 ? (
+                  <>
+                    <div className="space-y-4">
+                      {Object.entries(
+                        addOns[menuItems.find(item => item.id === selectedItems[selectedItemIndex]?.menu_item_id)?.category as string || '']
+                          .reduce((acc, addon) => {
+                            const type = addon.type || 'other';
+                            if (!acc[type]) acc[type] = [];
+                            acc[type].push(addon);
+                            return acc;
+                          }, {} as Record<string, AddOn[]>)
+                      ).map(([type, typeAddons]) => (
+                        <div key={type} className="space-y-2">
+                          <h4 className="font-medium capitalize">{type}</h4>
+                          <div className="space-y-2">
+                            {typeAddons.map((addon) => {
+                              const isSelected = selectedAddOns.some(
+                                item => item.add_on_id === addon.id
+                              );
+                              
+                              return (
+                                <div key={addon.id} className="flex items-center space-x-2">
+                                  <Checkbox 
+                                    id={`addon-${addon.id}`}
+                                    checked={isSelected}
+                                    onCheckedChange={() => handleAddOnToggle(addon)}
+                                  />
+                                  <label
+                                    htmlFor={`addon-${addon.id}`}
+                                    className="flex flex-1 justify-between text-sm font-medium cursor-pointer"
+                                  >
+                                    <span>{addon.name}</span>
+                                    <span>{formatPrice(addon.price)}</span>
+                                  </label>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-center text-gray-500 py-6">
+                    No add-ons available for this item
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+          
+          <SheetFooter className="pt-4">
+            <Button
+              variant="outline"
+              onClick={() => setIsAddOnSheetOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button onClick={confirmAddOns}>
+              Confirm Add-ons
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 } 

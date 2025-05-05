@@ -14,6 +14,7 @@ import {
   Phone,
   Calendar,
   DollarSign,
+  Eye
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ import { formatPrice, formatDate } from "@/lib/utils";
 import { Order, OrderStatus } from "@/lib/api/types";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { OrderViewModal } from "@/components/OrderViewModal";
 
 // Format phone number for display
 const formatPhoneNumber = (phone: string) => {
@@ -51,6 +53,7 @@ export default function OrderDetailsPage({ params }: any) {
   const [isLoading, setIsLoading] = useState(true);
   const [estimatedTime, setEstimatedTime] = useState<number>(30); // Default to 30 minutes
   const [isConfirmingOrder, setIsConfirmingOrder] = useState(false);
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
 
   useEffect(() => {
     const fetchOrder = async () => {
@@ -169,6 +172,14 @@ export default function OrderDetailsPage({ params }: any) {
     }
   };
 
+  const openViewModal = () => {
+    setIsViewModalOpen(true);
+  };
+
+  const closeViewModal = () => {
+    setIsViewModalOpen(false);
+  };
+
   // Fallback for loading state
   if (isLoading) {
     return (
@@ -217,6 +228,15 @@ export default function OrderDetailsPage({ params }: any) {
             )}
           </div>
         </div>
+        <div className="ml-auto">
+          <Button
+            variant="outline"
+            onClick={openViewModal}
+          >
+            <Eye className="h-4 w-4 mr-2" />
+            Quick View
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -232,6 +252,19 @@ export default function OrderDetailsPage({ params }: any) {
                     <div>
                       <p className="font-medium">{item.quantity}x {item.menu_item_name}</p>
                       <p className="text-sm text-gray-500">{formatPrice(item.base_price)} each</p>
+                      {item.add_ons && item.add_ons.length > 0 && (
+                        <div className="mt-1">
+                          <p className="text-xs text-gray-500 font-medium">Add-ons:</p>
+                          <ul className="text-xs text-gray-500 pl-2">
+                            {item.add_ons.map((addon, i) => (
+                              <li key={i} className="flex justify-between">
+                                <span>{addon.add_on_name}</span>
+                                <span>{formatPrice(addon.price)}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
                     </div>
                     <p className="font-medium">{formatPrice(item.total_price)}</p>
                   </div>
@@ -384,6 +417,15 @@ export default function OrderDetailsPage({ params }: any) {
           </Card>
         </div>
       </div>
+
+      {/* View Order Modal */}
+      {order && (
+        <OrderViewModal
+          order={order}
+          isOpen={isViewModalOpen}
+          onClose={closeViewModal}
+        />
+      )}
     </div>
   );
 } 

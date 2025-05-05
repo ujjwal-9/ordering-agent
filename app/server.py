@@ -37,9 +37,12 @@ print("Database initialized and tables created")
 
 # List of allowed ports for frontend dev
 ports = [3000]
-allow_origins = [f"http://0.0.0.0:{port}" for port in ports] + [
-    f"http://34.44.106.200:{port}" for port in ports
-]
+allow_origins = (
+    [f"http://0.0.0.0:{port}" for port in ports]
+    + [f"http://34.44.106.200:{port}" for port in ports]
+    + [f"http://127.0.0.1:{port}" for port in ports]
+    + [f"http://localhost:{port}" for port in ports]
+)
 
 # Configure CORS middleware for the frontend
 app.add_middleware(
@@ -650,7 +653,6 @@ async def get_customers(current_user: User = Depends(get_current_user)):
             "phone": customer.phone,
             "email": customer.email,
             "preferred_payment_method": customer.preferred_payment_method,
-            "dietary_preferences": customer.dietary_preferences,
             "last_order_date": customer.last_order_date,
             "total_orders": customer.total_orders,
             "created_at": customer.created_at,
@@ -677,7 +679,6 @@ class CustomerUpdate(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     preferred_payment_method: Optional[str] = None
-    dietary_preferences: Optional[str] = None
 
 
 # Update customer information

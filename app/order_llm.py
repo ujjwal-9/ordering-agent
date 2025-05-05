@@ -71,7 +71,6 @@ agent_prompt = """Task: As a professional restaurant order assistant for Tote AI
 
 6. Additional Information:
 - Mention current wait times for pickup
-- Explain payment options
 - Handle order tracking requests
 - Clearly communicate the pickup address when the order is confirmed
 
@@ -371,7 +370,7 @@ When discussing the menu:
                         "properties": {
                             "step": {
                                 "type": "string",
-                                "description": "The current step of information collection (phone, name, email, payment_method, dietary_preferences)",
+                                "description": "The current step of information collection (phone, name, email, payment_method)",
                             },
                             "phone": {
                                 "type": "integer",
@@ -388,10 +387,6 @@ When discussing the menu:
                             "preferred_payment_method": {
                                 "type": "string",
                                 "description": "The customer's preferred payment method",
-                            },
-                            "dietary_preferences": {
-                                "type": "string",
-                                "description": "Any dietary preferences or restrictions",
                             },
                         },
                         "required": ["step"],
@@ -643,12 +638,6 @@ When discussing the menu:
                         ):
                             response_text += f"Your preferred payment method is {customer.preferred_payment_method}. "
 
-                        if (
-                            hasattr(customer, "dietary_preferences")
-                            and customer.dietary_preferences
-                        ):
-                            response_text += f"Your dietary preferences are {customer.dietary_preferences}. "
-
                         if hasattr(customer, "total_orders"):
                             response_text += f"\nYou've placed {customer.total_orders} orders with us. "
 
@@ -751,14 +740,6 @@ When discussing the menu:
                         end_call=False,
                     )
 
-                elif step == "dietary_preferences":
-                    yield ResponseResponse(
-                        response_id=request.response_id,
-                        content="Do you have any dietary preferences or restrictions? (e.g., vegetarian, no-pork, etc.)",
-                        content_complete=True,
-                        end_call=False,
-                    )
-
                 elif step == "complete":
                     # Validate phone number
                     is_valid, phone_str, error_message = self._validate_phone_number(
@@ -784,9 +765,6 @@ When discussing the menu:
                         "email": func_call["arguments"].get("email"),
                         "preferred_payment_method": func_call["arguments"].get(
                             "preferred_payment_method"
-                        ),
-                        "dietary_preferences": func_call["arguments"].get(
-                            "dietary_preferences"
                         ),
                     }
 
@@ -1110,6 +1088,8 @@ When discussing the menu:
             )
 
     def _calculate_total_amount(self, order_items):
+        """Calculate the total amount for an order based on the menu items and their add-ons."""
+        print(f"Calculating total amount for order: {order_items}")
         total = 0
         for item in order_items:
             menu_item = self.db.find_similar_menu_item(item["item_name"])

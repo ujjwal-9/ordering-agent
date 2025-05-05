@@ -23,7 +23,6 @@ export const customerSchema = z.object({
   phone: z.string().min(10, "Phone number must be at least 10 digits"),
   email: z.string().email("Please enter a valid email address").optional(),
   preferred_payment_method: z.string().optional(),
-  dietary_preferences: z.string().optional(),
 });
 
 // Menu item schema

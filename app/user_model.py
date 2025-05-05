@@ -15,6 +15,9 @@ import hashlib
 import uuid
 import jwt
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
+
+load_dotenv("../.env")
 
 # Create a Base for table definition
 Base = declarative_base()
@@ -194,10 +197,26 @@ class UserManager:
 
 # Initialize the database if this module is run directly
 if __name__ == "__main__":
-    database_url = os.getenv(
-        "DATABASE_URL",
-        "postgresql://postgres:Tote**2025@localhost:5432/tote",
-    )
+    from dotenv import load_dotenv
+
+    # First try to load ../.env
+    if os.path.exists("../.env"):
+        load_dotenv(dotenv_path="../.env")
+    # If not found, try .env in current directory
+    elif os.path.exists(".env"):
+        load_dotenv(dotenv_path=".env")
+    else:
+        raise FileNotFoundError("Environment file not found in either ../.env or .env")
+    # Construct database URL from individual environment variables
+    db_user = os.environ["DATABASE_USER"]
+    db_password = os.environ["DATABASE_PASSWORD"]
+    db_host = os.environ["DATABASE_HOST"]
+    db_port = os.environ["DATABASE_PORT"]
+    db_name = os.environ["DATABASE_NAME"]
+
+    # Build the connection string
+    database_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+    print(f"Database URL: {database_url}")
     engine = create_engine(database_url)
 
     # Create all tables
@@ -218,8 +237,8 @@ if __name__ == "__main__":
         try:
             admin_user = user_manager.register_user(
                 username="admin",
-                email="ujjwalupadhyay8@gmail.com",
-                password="test@1234",  # This should be a secure password in production
+                email="admin@tote.ai",
+                password="tote@1234",  # This should be a secure password in production
             )
             admin_user.is_admin = True
             session.commit()

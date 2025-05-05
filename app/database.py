@@ -18,6 +18,7 @@ import os
 import json
 import time
 from app.user_model import User, Base as UserBase
+from dotenv import load_dotenv
 
 Base = declarative_base()
 
@@ -75,7 +76,6 @@ class Customer(Base):
     phone = Column(String, nullable=False, unique=True)
     email = Column(String)  # Add email field
     preferred_payment_method = Column(String)
-    dietary_preferences = Column(String)  # e.g., "vegetarian", "no-pork", etc.
     last_order_date = Column(DateTime)
     total_orders = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -102,18 +102,27 @@ class Restaurant(Base):
 class Database:
     def __init__(self):
         try:
+            # First try to load ../.env
+            if os.path.exists("../.env"):
+                load_dotenv(dotenv_path="../.env")
+            # If not found, try .env in current directory
+            elif os.path.exists(".env"):
+                load_dotenv(dotenv_path=".env")
+            else:
+                raise FileNotFoundError(
+                    "Environment file not found in either ../.env or .env"
+                )
             # Construct database URL from individual environment variables
-            db_user = os.getenv("DATABASE_USER", "postgres")
-            db_password = os.getenv("DATABASE_PASSWORD", "Tote**2025")
-            db_host = os.getenv("DATABASE_HOST", "localhost")
-            db_port = os.getenv("DATABASE_PORT", "5432")
-            db_name = os.getenv("DATABASE_NAME", "tote")
+            db_user = os.environ["DATABASE_USER"]
+            db_password = os.environ["DATABASE_PASSWORD"]
+            db_host = os.environ["DATABASE_HOST"]
+            db_port = os.environ["DATABASE_PORT"]
+            db_name = os.environ["DATABASE_NAME"]
 
             # Build the connection string
             database_url = (
                 f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
             )
-
             self.engine = create_engine(database_url)
 
             # Create all tables including User table from user_model
@@ -147,7 +156,6 @@ class Database:
             "phone": "VARCHAR",
             "email": "VARCHAR",  # Add email field
             "preferred_payment_method": "VARCHAR",
-            "dietary_preferences": "VARCHAR",
             "last_order_date": "TIMESTAMP",
             "total_orders": "INTEGER",
             "created_at": "TIMESTAMP",

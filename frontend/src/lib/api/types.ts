@@ -30,7 +30,6 @@ export interface Customer {
   phone: string;
   email?: string;
   preferred_payment_method?: string;
-  dietary_preferences?: string;
   last_order_date?: string;
   total_orders: number;
   created_at: string;
@@ -42,7 +41,6 @@ export interface CustomerCreate {
   phone: string;
   email?: string;
   preferred_payment_method?: string;
-  dietary_preferences?: string;
 }
 
 // Menu types

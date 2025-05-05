@@ -9,7 +9,9 @@ import {
   CheckCircle2,
   XCircle,
   RefreshCw,
-  Plus
+  Plus,
+  Eye,
+  Filter
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -34,6 +36,8 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { OrderViewModal } from "@/components/OrderViewModal";
+import { Switch } from "@/components/ui/switch";
 
 // Format phone number for display
 const formatPhoneNumber = (phone: string) => {
@@ -52,13 +56,26 @@ const formatPhoneNumber = (phone: string) => {
 export default function OrdersPage() {
   const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
+  const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [confirmingOrderId, setConfirmingOrderId] = useState<number | null>(null);
   const [estimatedTime, setEstimatedTime] = useState(30); // Default to 30 minutes
+  const [viewingOrder, setViewingOrder] = useState<Order | null>(null);
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [hideCanceledOrders, setHideCanceledOrders] = useState(false);
 
   useEffect(() => {
     fetchOrders();
   }, []);
+
+  // Filter orders whenever the filter state or orders change
+  useEffect(() => {
+    if (hideCanceledOrders) {
+      setFilteredOrders(orders.filter(order => order.status !== "cancelled"));
+    } else {
+      setFilteredOrders(orders);
+    }
+  }, [orders, hideCanceledOrders]);
 
   const fetchOrders = async () => {
     try {
@@ -94,6 +111,16 @@ export default function OrdersPage() {
   const openConfirmDialog = (orderId: number) => {
     setConfirmingOrderId(orderId);
     setEstimatedTime(30); // Reset to default
+  };
+
+  const openViewModal = (order: Order) => {
+    setViewingOrder(order);
+    setIsViewModalOpen(true);
+  };
+
+  const closeViewModal = () => {
+    setIsViewModalOpen(false);
+    setViewingOrder(null);
   };
 
   const handleConfirmWithTime = async () => {
@@ -151,16 +178,32 @@ export default function OrdersPage() {
   }
 
   // Fallback for empty state
-  if (!orders || orders.length === 0) {
+  if (!filteredOrders || filteredOrders.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-100px)]">
         <ShoppingBag className="h-16 w-16 text-gray-400 mb-4" />
-        <h2 className="text-2xl font-bold mb-2">No orders yet</h2>
-        <p className="text-gray-500 mb-4">Your orders will appear here once customers place them.</p>
-        <Button onClick={() => router.push("/dashboard/orders/create")}>
-          <Plus className="h-4 w-4 mr-2" />
-          Create Order
-        </Button>
+        <h2 className="text-2xl font-bold mb-2">
+          {orders.length > 0 && hideCanceledOrders 
+            ? "No non-cancelled orders found" 
+            : "No orders yet"}
+        </h2>
+        <p className="text-gray-500 mb-4">
+          {orders.length > 0 && hideCanceledOrders
+            ? "All existing orders have been cancelled. Adjust the filter to see cancelled orders."
+            : "Your orders will appear here once customers place them."}
+        </p>
+        <div className="flex gap-2 items-center">
+          {orders.length > 0 && hideCanceledOrders && (
+            <Button variant="outline" onClick={() => setHideCanceledOrders(false)}>
+              <Filter className="h-4 w-4 mr-2" />
+              Show All Orders
+            </Button>
+          )}
+          <Button onClick={() => router.push("/dashboard/orders/create")}>
+            <Plus className="h-4 w-4 mr-2" />
+            Create Order
+          </Button>
+        </div>
       </div>
     );
   }
@@ -174,15 +217,27 @@ export default function OrdersPage() {
             Manage and track all customer orders
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={fetchOrders}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
-          </Button>
-          <Button onClick={() => router.push("/dashboard/orders/create")}>
-            <Plus className="h-4 w-4 mr-2" />
-            Create Order
-          </Button>
+        <div className="flex gap-4 items-center">
+          <div className="flex items-center gap-2">
+            <Label htmlFor="hide-cancelled" className="text-sm cursor-pointer select-none">
+              Hide cancelled orders
+            </Label>
+            <Switch 
+              id="hide-cancelled" 
+              checked={hideCanceledOrders}
+              onCheckedChange={setHideCanceledOrders}
+            />
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={fetchOrders}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Refresh
+            </Button>
+            <Button onClick={() => router.push("/dashboard/orders/create")}>
+              <Plus className="h-4 w-4 mr-2" />
+              Create Order
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -200,7 +255,7 @@ export default function OrdersPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {orders.map((order) => (
+            {filteredOrders.map((order) => (
               <TableRow key={order.id}>
                 <TableCell className="font-medium">#{order.id}</TableCell>
                 <TableCell>
@@ -273,6 +328,15 @@ export default function OrdersPage() {
                         Mark Delivered
                       </Button>
                     )}
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      className="h-8"
+                      onClick={() => openViewModal(order)}
+                    >
+                      <Eye className="h-4 w-4 mr-1" />
+                      View
+                    </Button>
                   </div>
                 </TableCell>
               </TableRow>
@@ -308,6 +372,15 @@ export default function OrdersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* View Order Modal */}
+      {viewingOrder && (
+        <OrderViewModal
+          order={viewingOrder}
+          isOpen={isViewModalOpen}
+          onClose={closeViewModal}
+        />
+      )}
     </div>
   );
 } 

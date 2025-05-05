@@ -12,6 +12,7 @@ import {
   Clock,
   CheckCircle2,
   XCircle,
+  Filter,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -21,6 +22,8 @@ import { orderApi } from "@/lib/api/api-service";
 import { fadeIn, staggerContainer } from "@/lib/animations";
 import { formatPrice, formatDate } from "@/lib/utils";
 import { Order, OrderStatus } from "@/lib/api/types";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 
 // Format phone number for display
 const formatPhoneNumber = (phone: string) => {
@@ -38,7 +41,9 @@ const formatPhoneNumber = (phone: string) => {
 
 export default function DashboardPage() {
   const [orders, setOrders] = useState<Order[]>([]);
+  const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [hideCanceledOrders, setHideCanceledOrders] = useState(false);
   const [stats, setStats] = useState({
     totalOrders: 0,
     pendingOrders: 0,
@@ -74,6 +79,15 @@ export default function DashboardPage() {
     fetchData();
   }, []);
 
+  // Filter orders whenever the filter state or orders change
+  useEffect(() => {
+    if (hideCanceledOrders) {
+      setFilteredOrders(orders.filter(order => order.status !== "cancelled"));
+    } else {
+      setFilteredOrders(orders);
+    }
+  }, [orders, hideCanceledOrders]);
+
   const handleUpdateStatus = async (orderId: number, newStatus: OrderStatus) => {
     try {
       // Update order status via API
@@ -103,12 +117,28 @@ export default function DashboardPage() {
   }
 
   // Fallback for empty state
-  if (!orders || orders.length === 0) {
+  if (!filteredOrders || filteredOrders.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-100px)]">
         <ShoppingBag className="h-16 w-16 text-gray-400 mb-4" />
-        <h2 className="text-2xl font-bold mb-2">No orders yet</h2>
-        <p className="text-gray-500 mb-4">Your orders will appear here once customers place them.</p>
+        <h2 className="text-2xl font-bold mb-2">
+          {orders.length > 0 && hideCanceledOrders 
+            ? "No non-cancelled orders found" 
+            : "No orders yet"}
+        </h2>
+        <p className="text-gray-500 mb-4">
+          {orders.length > 0 && hideCanceledOrders
+            ? "All existing orders have been cancelled. Adjust the filter to see cancelled orders."
+            : "Your orders will appear here once customers place them."}
+        </p>
+        <div className="flex gap-2 items-center">
+          {orders.length > 0 && hideCanceledOrders && (
+            <Button variant="outline" onClick={() => setHideCanceledOrders(false)}>
+              <Filter className="h-4 w-4 mr-2" />
+              Show All Orders
+            </Button>
+          )}
+        </div>
       </div>
     );
   }
@@ -187,11 +217,23 @@ export default function DashboardPage() {
         <Card className="col-span-4">
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>Recent Orders</CardTitle>
-            <Link href="/dashboard/orders">
-              <Button variant="ghost" size="sm" className="gap-1">
-                View all <ArrowRight className="h-4 w-4" />
-              </Button>
-            </Link>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="hide-cancelled-dash" className="text-sm cursor-pointer select-none">
+                  Hide cancelled orders
+                </Label>
+                <Switch 
+                  id="hide-cancelled-dash" 
+                  checked={hideCanceledOrders}
+                  onCheckedChange={setHideCanceledOrders}
+                />
+              </div>
+              <Link href="/dashboard/orders">
+                <Button variant="ghost" size="sm" className="gap-1">
+                  View all <ArrowRight className="h-4 w-4" />
+                </Button>
+              </Link>
+            </div>
           </CardHeader>
           <CardContent>
             <div className="rounded-md border">
@@ -219,7 +261,7 @@ export default function DashboardPage() {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {orders.map((order) => (
+                  {filteredOrders.map((order) => (
                     <tr key={order.id}>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                         #{order.id}
