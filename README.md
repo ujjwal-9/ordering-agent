@@ -1,5 +1,9 @@
 # Phone Ordering System
 
+## Architecture
+
+![Architecture Diagram](./assets/architecture.png)
+
 ## Features
 
 - Real-time voice conversation with an AI agent
